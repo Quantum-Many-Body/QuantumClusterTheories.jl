@@ -1,0 +1,7 @@
+name = "QuantumClusterTheory"
+uuid = "342fe1ec-171d-4a94-8db0-2a3b7882bd2c"
+authors = ["waltergu <waltergu1989@gmail.com> and contributors"]
+version = "0.1.0"
+
+[compat]
+julia = "1.6"
