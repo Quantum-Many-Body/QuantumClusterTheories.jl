@@ -1,14 +1,14 @@
 ```@meta
-CurrentModule = QuantumClusterTheory
+CurrentModule = QuantumClusterTheories
 ```
 
-# QuantumClusterTheory
+# QuantumClusterTheories
 
-Documentation for [QuantumClusterTheory](https://github.com/Quantum-Many-Body/QuantumClusterTheory.jl).
+Documentation for [QuantumClusterTheories](https://github.com/Quantum-Many-Body/QuantumClusterTheories.jl).
 
 ```@index
 ```
 
 ```@autodocs
-Modules = [QuantumClusterTheory]
+Modules = [QuantumClusterTheories]
 ```

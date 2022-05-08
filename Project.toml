@@ -1,5 +1,5 @@
-name = "QuantumClusterTheory"
-uuid = "342fe1ec-171d-4a94-8db0-2a3b7882bd2c"
+name = "QuantumClusterTheories"
+uuid = "097857cb-d914-4df9-ba6d-e02fb595fe10"
 authors = ["waltergu <waltergu1989@gmail.com> and contributors"]
 version = "0.1.0"
 

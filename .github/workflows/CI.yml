@@ -56,6 +56,6 @@ jobs:
       - run: |
           julia --project=docs -e '
             using Documenter: DocMeta, doctest
-            using QuantumClusterTheory
-            DocMeta.setdocmeta!(QuantumClusterTheory, :DocTestSetup, :(using QuantumClusterTheory); recursive=true)
-            doctest(QuantumClusterTheory)'
+            using QuantumClusterTheories
+            DocMeta.setdocmeta!(QuantumClusterTheories, :DocTestSetup, :(using QuantumClusterTheories); recursive=true)
+            doctest(QuantumClusterTheories)'

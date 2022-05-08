@@ -1,6 +1,6 @@
-using QuantumClusterTheory
+using QuantumClusterTheories
 using Test
 
-@testset "QuantumClusterTheory.jl" begin
+@testset "QuantumClusterTheories.jl" begin
     # Write your tests here.
 end

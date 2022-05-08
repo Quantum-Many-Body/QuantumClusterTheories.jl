@@ -1,16 +1,16 @@
-using QuantumClusterTheory
+using QuantumClusterTheories
 using Documenter
 
-DocMeta.setdocmeta!(QuantumClusterTheory, :DocTestSetup, :(using QuantumClusterTheory); recursive=true)
+DocMeta.setdocmeta!(QuantumClusterTheories, :DocTestSetup, :(using QuantumClusterTheories); recursive=true)
 
 makedocs(;
-    modules=[QuantumClusterTheory],
+    modules=[QuantumClusterTheories],
     authors="waltergu <waltergu1989@gmail.com> and contributors",
-    repo="https://github.com/Quantum-Many-Body/QuantumClusterTheory.jl/blob/{commit}{path}#{line}",
-    sitename="QuantumClusterTheory.jl",
+    repo="https://github.com/Quantum-Many-Body/QuantumClusterTheories.jl/blob/{commit}{path}#{line}",
+    sitename="QuantumClusterTheories.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://Quantum-Many-Body.github.io/QuantumClusterTheory.jl",
+        canonical="https://Quantum-Many-Body.github.io/QuantumClusterTheories.jl",
         assets=String[],
     ),
     pages=[
@@ -19,6 +19,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/Quantum-Many-Body/QuantumClusterTheory.jl",
+    repo="github.com/Quantum-Many-Body/QuantumClusterTheories.jl",
     devbranch="main",
 )

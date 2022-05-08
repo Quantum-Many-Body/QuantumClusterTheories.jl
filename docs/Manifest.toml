@@ -67,9 +67,9 @@ version = "2.3.1"
 deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
-[[QuantumClusterTheory]]
+[[QuantumClusterTheories]]
 path = ".."
-uuid = "342fe1ec-171d-4a94-8db0-2a3b7882bd2c"
+uuid = "097857cb-d914-4df9-ba6d-e02fb595fe10"
 version = "0.1.0"
 
 [[REPL]]

@@ -1,12 +1,12 @@
 *.jl.*.cov
 *.jl.cov
 *.jl.mem
-/docs/build/
 
 deps/deps.jl
 docs/build/
 test/*.png
 
 .ipynb_checkpoints/
+.vscode/
 
 desktop.ini
