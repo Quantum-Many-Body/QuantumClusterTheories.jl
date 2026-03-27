@@ -8,12 +8,30 @@ import QuantumClusterTheories: CPT, ImpuritySolver
 
 """
 """
+mutable struct Cache
+    ω::ComplexF64
+    const data::Matrix{ComplexF64}
+end
+
+"""
+"""
 struct EDSolver{E<:ED, O<:QuantumOperator, G<:RetardedGreenFunction} <: ImpuritySolver
     ed::E
     operators::Vector{O}
     gf::G
+    cache::Cache
+    function EDSolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, gf::RetardedGreenFunction)
+        new{typeof(ed), eltype(operators), typeof(gf)}(ed, operators, gf, Cache(zero(ComplexF64), gf(zero(ComplexF64))))
+    end
 end
-@inline (solver::EDSolver)(ω::Number) = solver.gf(ω)
+@inline function (solver::EDSolver)(ω::Number)
+    if ω≈solver.cache.ω
+        return solver.cache.data
+    else
+        solver.cache.ω = ω
+        return solver.gf(fill!(solver.cache.data, 0), ω)
+    end
+end
 
 """
 """

@@ -74,7 +74,7 @@ end
     data = zeros(length(es), length(path))
     for (i, e) in enumerate(es)
         for (j, k) in enumerate(path)
-            data[i, j] = -2*tr(imag(cpt(e+1im*η, k)))
+            data[i, j] = -2*imag(tr(cpt(e+1im*η, k)))
         end
     end
     Plots.savefig(Plots.plot(path, es, data), "Plots-Hubbard-Square-2x2-spectral.png")
