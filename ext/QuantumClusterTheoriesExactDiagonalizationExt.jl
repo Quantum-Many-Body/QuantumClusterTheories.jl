@@ -15,13 +15,12 @@ end
 
 """
 """
-struct EDSolver{E<:ED, O<:QuantumOperator, G<:RetardedGreenFunction} <: ImpuritySolver
+struct EDSolver{E<:ED, G<:RetardedGreenFunction} <: ImpuritySolver
     ed::E
-    operators::Vector{O}
     gf::G
     cache::Cache
-    function EDSolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, gf::RetardedGreenFunction)
-        new{typeof(ed), eltype(operators), typeof(gf)}(ed, operators, gf, Cache(zero(ComplexF64), gf(zero(ComplexF64))))
+    function EDSolver(ed::ED, gf::RetardedGreenFunction)
+        new{typeof(ed), typeof(gf)}(ed, gf, Cache(zero(ComplexF64), gf(zero(ComplexF64))))
     end
 end
 @inline function (solver::EDSolver)(ω::Number)
@@ -36,7 +35,7 @@ end
 """
 """
 @inline function ImpuritySolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method=BandLanczosMethod(); kwargs...)
-    return EDSolver(ed, operators, RetardedGreenFunction(operators, ed, method; kwargs...))
+    return EDSolver(ed, RetardedGreenFunction(operators, ed, method; kwargs...))
 end
 function ImpuritySolver(
     lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
@@ -48,8 +47,7 @@ function ImpuritySolver(
     sectors = broadcast(Sector, OneOrMore(quantumnumbers), hilbert; table)
     matrixization = EDMatrixization{dtype}(table, sectors...)
     ed = ED{typeof(edkind)}(lattice, system, matrixization)
-    tbakind = TBAKind(typeof(quadratic(terms)), valtype(hilbert))
-    ops = operators(tbakind, lattice, hilbert, Table(hilbert, Metric(tbakind, hilbert)))
+    ops = operators(TBAKind(typeof(quadratic(terms)), valtype(hilbert)), lattice, hilbert)
     return ImpuritySolver(ed, ops, method; kwargs...)
 end
 
@@ -62,8 +60,8 @@ function CPT(
     solver = ImpuritySolver(lattice, hilbert, terms, quantumnumbers, method, dtype; neighbors)
     pert = perturbation(lattice, hilbert, terms; neighbors)
     tbakind = kind(pert)
-    ops_lattice = operators(tbakind, lattice, hilbert, Table(hilbert, Metric(tbakind, hilbert)))
-    ops_unitcell = operators(tbakind, unitcell, hilbert, Table(hilbert, Metric(tbakind, hilbert)))
+    ops_lattice = operators(tbakind, lattice, hilbert)
+    ops_unitcell = operators(tbakind, unitcell, hilbert)
     periodization = Periodization(ops_lattice, ops_unitcell, unitcell.vectors)
     return CPT(unitcell, lattice, solver, pert, periodization)
 end

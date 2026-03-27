@@ -10,11 +10,11 @@ import Plots
     unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
     lattice = Lattice(unitcell, (2, 2), ('P', 'P'))
     hilbert = Hilbert(site=>Fock{:f}(1, 2) for site in eachindex(lattice))
-    @test operators(Fermionic(:TBA), lattice, hilbert, Table(hilbert, Metric(Fermionic(:TBA), hilbert))) == [
+    @test operators(Fermionic(:TBA), lattice, hilbert) == [
         𝕔(1, 1, -1//2, [0.0, 0.0], [0.0, 0.0]), 𝕔(1, 1, 1//2, [0.0, 0.0], [0.0, 0.0]), 𝕔(2, 1, -1//2, [1.0, 0.0], [0.0, 0.0]), 𝕔(2, 1, 1//2, [1.0, 0.0], [0.0, 0.0]),
         𝕔(3, 1, -1//2, [0.0, 1.0], [0.0, 0.0]), 𝕔(3, 1, 1//2, [0.0, 1.0], [0.0, 0.0]), 𝕔(4, 1, -1//2, [1.0, 1.0], [0.0, 0.0]), 𝕔(4, 1, 1//2, [1.0, 1.0], [0.0, 0.0])
     ]
-    @test operators(Fermionic(:BdG), lattice, hilbert, Table(hilbert, Metric(Fermionic(:BdG), hilbert))) == [
+    @test operators(Fermionic(:BdG), lattice, hilbert) == [
         𝕔(1, 1, -1//2, [0.0, 0.0], [0.0, 0.0]), 𝕔(1, 1, 1//2, [0.0, 0.0], [0.0, 0.0]), 𝕔(2, 1, -1//2, [1.0, 0.0], [0.0, 0.0]), 𝕔(2, 1, 1//2, [1.0, 0.0], [0.0, 0.0]),
         𝕔(3, 1, -1//2, [0.0, 1.0], [0.0, 0.0]), 𝕔(3, 1, 1//2, [0.0, 1.0], [0.0, 0.0]), 𝕔(4, 1, -1//2, [1.0, 1.0], [0.0, 0.0]), 𝕔(4, 1, 1//2, [1.0, 1.0], [0.0, 0.0]),
         𝕔⁺(1, 1, -1//2, [0.0, 0.0], [0.0, 0.0]), 𝕔⁺(1, 1, 1//2, [0.0, 0.0], [0.0, 0.0]), 𝕔⁺(2, 1, -1//2, [1.0, 0.0], [0.0, 0.0]), 𝕔⁺(2, 1, 1//2, [1.0, 0.0], [0.0, 0.0]),
@@ -36,8 +36,8 @@ import Plots
         0.0 0.0 0.0 1.0 0.0 1.0 0.0 0.0
     ]
 
-    ops_lattice = operators(Fermionic(:TBA), lattice, hilbert, Table(hilbert, Metric(Fermionic(:TBA), hilbert)))
-    ops_unitcell = operators(Fermionic(:TBA), unitcell, hilbert, Table(hilbert, Metric(Fermionic(:TBA), hilbert)))
+    ops_lattice = operators(Fermionic(:TBA), lattice, hilbert)
+    ops_unitcell = operators(Fermionic(:TBA), unitcell, hilbert)
     periodization = Periodization(ops_lattice, ops_unitcell, unitcell.vectors)
     @test periodization.coordinates == reduce(vcat, [[lattice[i], lattice[i]] for i in eachindex(lattice)])
     @test periodization.groups == [[1, 3, 5, 7], [2, 4, 6, 8]]
