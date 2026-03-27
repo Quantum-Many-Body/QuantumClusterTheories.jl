@@ -12,6 +12,9 @@ TightBindingApproximation = "d3576f78-cb9d-4774-9dc5-b247cf392ff4"
 [weakdeps]
 ExactDiagonalization = "52dcaa32-6da7-11e9-20ef-755843cf72eb"
 
+[extensions]
+QuantumClusterTheoriesExactDiagonalizationExt = ["ExactDiagonalization"]
+
 [compat]
 ExactDiagonalization = "0.3"
 LinearAlgebra = "1.10 - 1"
