@@ -9,10 +9,19 @@ using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
 export CPT, ImpuritySolver, Periodization, operators, perturbation, quadratic
 
 """
+    ImpuritySolver
+
+Abstract type for impurity solvers used in quantum cluster theory calculations.
+Subtypes must implement the call syntax `solver(ω)` to return the solver's response function at frequency `ω`.
 """
 abstract type ImpuritySolver end
 
 """
+    operators(tbakind::TBAKind{:TBA}, lattice::AbstractLattice, hilbert::Hilbert{<:Fock}, table::Table=Table(hilbert, Metric(tbakind, hilbert))) -> Vector{<:CoordinatedIndex}
+    operators(tbakind::TBAKind{:BdG}, lattice::AbstractLattice, hilbert::Hilbert{<:Fock}, table::Table=Table(hilbert, Metric(tbakind, hilbert))) -> Vector{<:CoordinatedIndex}
+
+Get the single-particle operators sorted by table index.
+For TBA kind, returns only annihilation operators; for BdG kind, returns all operators.
 """
 function operators(tbakind::TBAKind{:TBA}, lattice::AbstractLattice, hilbert::Hilbert{<:Fock}, table::Table=Table(hilbert, Metric(tbakind, hilbert)))
     result = [CoordinatedIndex(Index(site, fockindex), coordinate, zero(coordinate)) for (site, coordinate) in enumerate(lattice) for fockindex in hilbert[site] if isannihilation(fockindex)]
@@ -24,6 +33,9 @@ function operators(tbakind::TBAKind{:BdG}, lattice::AbstractLattice, hilbert::Hi
 end
 
 """
+    perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms)) -> TBA
+
+Construct a tight-binding approximation (TBA) object by keeping only the quadratic (pairwise) interaction terms on inter-cellular bonds.
 """
 function perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms))
     terms = quadratic(OneOrMore(terms))
@@ -33,14 +45,28 @@ function perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMo
     commt = commutator(kind, hilbert)
     return TBA{typeof(kind)}(lattice, H, quadraticization, commt)
 end
+"""
+    quadratic(terms::OneAtLeast{Term}) -> Tuple
+
+Extract the quadratic (rank-2) terms from a collection of terms.
+"""
 @generated quadratic(terms::OneAtLeast{Term}) = Expr(:tuple, [:(terms[$i]) for (i, T) in enumerate(fieldtypes(terms)) if rank(T)==2]...)
 
 """
+    Periodization{N}
+
+Structure for crystallographic periodization in quantum cluster theory.
+Stores the coordinates of lattice operators and groups them by equivalence under lattice translations.
 """
 struct Periodization{N}
     coordinates::Vector{SVector{N, Float64}}
     groups::Vector{Vector{Int}}
 end
+"""
+    Periodization(ops_lattice, ops_unitcell, vectors; atol=atol, rtol=rtol) -> Periodization
+
+Construct a `Periodization` object by grouping lattice operators into translation-equivalent sets.
+"""
 function Periodization(ops_lattice::AbstractVector{<:CoordinatedIndex}, ops_unitcell::AbstractVector{<:CoordinatedIndex}, vectors::AbstractVector{<:AbstractVector{<:Number}}; atol=atol, rtol=rtol)
     coordinates = map(rcoordinate, ops_lattice)
     groups = Vector{Int}[]
@@ -55,6 +81,9 @@ function Periodization(ops_lattice::AbstractVector{<:CoordinatedIndex}, ops_unit
 end
 
 """
+    (periodization::Periodization)(data::AbstractMatrix{<:Number}, k::AbstractVector{<:Number}) -> Matrix{ComplexF64}
+
+Apply crystallographic periodization to data at a given crystal momentum `k`.
 """
 function (periodization::Periodization)(data::AbstractMatrix{<:Number}, k::AbstractVector{<:Number})
     N = length(periodization.groups)
@@ -72,6 +101,9 @@ function (periodization::Periodization)(data::AbstractMatrix{<:Number}, k::Abstr
 end
 
 """
+    CPT{L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: Frontend
+
+Cluster perturbation theory (CPT) frontend combining a unit cell, full lattice, impurity solver, perturbation, and periodization.
 """
 struct CPT{L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: Frontend
     unitcell::L
@@ -82,6 +114,11 @@ struct CPT{L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: F
 end
 
 """
+    (cpt::CPT)(ω::Number) -> Matrix{ComplexF64}
+    (cpt::CPT)(ω::Number, k::AbstractVector{<:Number}) -> Matrix{ComplexF64}
+
+Evaluate the cluster perturbation theory single-particle Green's function.
+With only `ω`, returns the real-space CPT Green's function. With `k`, returns the momentum-space periodised Green's function.
 """
 @inline (cpt::CPT)(ω::Number) = inv(inv(cpt.solver(ω))-matrix(cpt.perturbation))
 @inline (cpt::CPT)(ω::Number, k::AbstractVector{<:Number}) = cpt.periodization(inv(inv(cpt.solver(ω))-matrix(cpt.perturbation, k)), k)

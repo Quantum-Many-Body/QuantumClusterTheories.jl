@@ -7,6 +7,9 @@ using TightBindingApproximation: TBAKind
 import QuantumClusterTheories: CPT, ImpuritySolver
 
 """
+    Cache
+
+Mutable cache for storing the retarded Green's function data at a given frequency.
 """
 mutable struct Cache
     ω::ComplexF64
@@ -14,6 +17,9 @@ mutable struct Cache
 end
 
 """
+    EDSolver{E<:ED, G<:RetardedGreenFunction} <: ImpuritySolver
+
+Exact diagonalization based impurity solver computing the retarded Green's function with caching.
 """
 struct EDSolver{E<:ED, G<:RetardedGreenFunction} <: ImpuritySolver
     ed::E
@@ -23,6 +29,12 @@ struct EDSolver{E<:ED, G<:RetardedGreenFunction} <: ImpuritySolver
         new{typeof(ed), typeof(gf)}(ed, gf, Cache(zero(ComplexF64), gf(zero(ComplexF64))))
     end
 end
+
+"""
+    (solver::EDSolver)(ω::Number) -> Matrix{ComplexF64}
+
+Evaluate the retarded Green's function at frequency `ω` using cached results when available.
+"""
 @inline function (solver::EDSolver)(ω::Number)
     if ω≈solver.cache.ω
         return solver.cache.data
@@ -33,10 +45,19 @@ end
 end
 
 """
+    ImpuritySolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method=BandLanczosMethod(); kwargs...) -> EDSolver
+
+Construct an exact diagonalization based impurity solver from an ED object and a list of operators.
 """
 @inline function ImpuritySolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method=BandLanczosMethod(); kwargs...)
     return EDSolver(ed, RetardedGreenFunction(operators, ed, method; kwargs...))
 end
+
+"""
+    ImpuritySolver(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms); neighbors::Union{Int, Neighbors}=nneighbor(terms), kwargs...) -> EDSolver
+
+Construct an exact diagonalization based impurity solver from a lattice, hilbert space, terms, and quantum numbers.
+"""
 function ImpuritySolver(
     lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
     neighbors::Union{Int, Neighbors}=nneighbor(terms), kwargs...
@@ -52,6 +73,9 @@ function ImpuritySolver(
 end
 
 """
+    CPT(unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms); neighbors::Union{Int, Neighbors}=nneighbor(terms), atol=atol, rtol=rtol, kwargs...) -> CPT
+
+Construct a cluster perturbation theory (CPT) frontend using exact diagonalization as the impurity solver.
 """
 function CPT(
     unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
