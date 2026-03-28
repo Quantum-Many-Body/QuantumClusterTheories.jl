@@ -11,10 +11,13 @@ makedocs(;
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
         canonical="https://Quantum-Many-Body.github.io/QuantumClusterTheories.jl",
-        assets=String[],
+        assets=["assets/favicon.ico"],
     ),
     pages=[
         "Home" => "index.md",
+            "Manual" => [
+            "manual/QuantumClusterTheories.md",
+        ]
     ],
 )
 
