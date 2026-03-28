@@ -1,3 +1,7 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+ExactDiagonalization = "52dcaa32-6da7-11e9-20ef-755843cf72eb"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 QuantumClusterTheories = "097857cb-d914-4df9-ba6d-e02fb595fe10"
+QuantumLattices = "78ae1a1f-1d5d-5174-b61c-66e31b2346dc"
+TightBindingApproximation = "d3576f78-cb9d-4774-9dc5-b247cf392ff4"

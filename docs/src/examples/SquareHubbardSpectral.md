@@ -9,6 +9,8 @@ CurrentModule = QuantumClusterTheories
 The following code can compute the single-particle spectral function of the Fermi Hubbard model on a square lattice using cluster perturbation theory (CPT).
 
 ```@example square-hubbard-spectral
+using ExactDiagonalization
+using LinearAlgebra: tr
 using QuantumLattices
 using QuantumClusterTheories
 using TightBindingApproximation
