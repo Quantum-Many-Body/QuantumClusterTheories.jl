@@ -17,6 +17,10 @@ makedocs(;
         "Home" => "index.md",
             "Manual" => [
             "manual/QuantumClusterTheories.md",
+        ],
+            "Examples" => [
+            "examples/Introduction.md",
+            "examples/SquareHubbardSpectral.md",
         ]
     ],
 )
