@@ -1,7 +1,7 @@
 module QuantumClusterTheories
 
 using LinearAlgebra: dot, inv
-using QuantumLattices: AbstractLattice, CoordinatedIndex, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, Table, Term
+using QuantumLattices: AbstractLattice, Bond, CoordinatedIndex, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, Table, Term
 using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, rtol
 using StaticArrays: SVector
 using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
@@ -34,17 +34,25 @@ end
 
 """
     perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms)) -> TBA
+    perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}) -> TBA
 
-Construct a tight-binding approximation (TBA) object by keeping only the quadratic (pairwise) interaction terms on inter-cellular bonds.
+Construct a tight-binding approximation (TBA) object by keeping only the quadratic (pairwise) interaction terms.
+
+The first method extracts inter-cellular bonds from the lattice and delegates to the second method.
+The second method takes bonds directly and constructs the TBA from the given `bonds`, `hilbert` space, and `terms`.
 """
-function perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms))
+@inline function perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms))
+    return perturbation(filter!(!isintracell, bonds(lattice, neighbors)), hilbert, terms)
+end
+function perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term})
     terms = quadratic(OneOrMore(terms))
     kind = TBAKind(typeof(terms), valtype(hilbert))
-    H = Generator(filter!(!isintracell, bonds(lattice, neighbors)), hilbert, terms, plain, lazy; half=false)
+    H = Generator(bonds, hilbert, terms, plain, lazy; half=false)
     quadraticization = Quadraticization{typeof(kind)}(Table(hilbert, Metric(kind, hilbert)))
     commt = commutator(kind, hilbert)
-    return TBA{typeof(kind)}(lattice, H, quadraticization, commt)
+    return TBA{typeof(kind)}(H, quadraticization, commt)
 end
+
 """
     quadratic(terms::OneAtLeast{Term}) -> Tuple
 
