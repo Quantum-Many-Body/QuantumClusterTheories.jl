@@ -25,10 +25,8 @@ struct EDSolver{E<:ED, G<:RetardedGreenFunction} <: ImpuritySolver
     ed::E
     gf::G
     cache::Cache
-    function EDSolver(ed::ED, gf::RetardedGreenFunction)
-        new{typeof(ed), typeof(gf)}(ed, gf, Cache(zero(ComplexF64), gf(zero(ComplexF64))))
-    end
 end
+@inline EDSolver(ed::ED, gf::RetardedGreenFunction) = EDSolver(ed, gf, Cache(0im, gf(0im)))
 
 """
     (solver::EDSolver)(ω::Number) -> Matrix{ComplexF64}
@@ -45,16 +43,10 @@ Evaluate the retarded Green's function at frequency `ω` using cached results wh
 end
 
 """
-    ImpuritySolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method=BandLanczosMethod(); kwargs...) -> EDSolver
-
-Construct an exact diagonalization based impurity solver from an ED object and a list of operators.
-"""
-@inline function ImpuritySolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method=BandLanczosMethod(); kwargs...)
-    return EDSolver(ed, RetardedGreenFunction(operators, ed, method; kwargs...))
-end
-
-"""
-    ImpuritySolver(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms); neighbors::Union{Int, Neighbors}=nneighbor(terms), kwargs...) -> EDSolver
+    ImpuritySolver(
+        lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
+        neighbors::Union{Int, Neighbors}=nneighbor(terms), kwargs...
+    ) -> EDSolver
 
 Construct an exact diagonalization based impurity solver from a lattice, hilbert space, terms, and quantum numbers.
 """
@@ -68,8 +60,8 @@ function ImpuritySolver(
     sectors = broadcast(Sector, OneOrMore(quantumnumbers), hilbert; table)
     matrixization = EDMatrixization{dtype}(table, sectors...)
     ed = ED{typeof(edkind)}(lattice, system, matrixization)
-    ops = operators(TBAKind(typeof(quadratic(terms)), valtype(hilbert)), lattice, hilbert)
-    return ImpuritySolver(ed, ops, method; kwargs...)
+    gf = RetardedGreenFunction(operators(TBAKind(typeof(quadratic(terms)), valtype(hilbert)), lattice, hilbert), ed, method; kwargs...)
+    return EDSolver(ed, gf)
 end
 
 """
