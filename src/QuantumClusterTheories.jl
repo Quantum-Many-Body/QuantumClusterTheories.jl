@@ -1,12 +1,13 @@
 module QuantumClusterTheories
 
-using LinearAlgebra: dot, inv
-using QuantumLattices: AbstractLattice, Bond, CoordinatedIndex, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, Table, Term
+using LinearAlgebra: dot, inv, tr
+using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
 using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, rtol
 using StaticArrays: SVector
 using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
+import QuantumLattices: Parameters, options, run!, update!
 
-export CPT, ImpuritySolver, Periodization, operators, perturbation, quadratic
+export CPT, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, operators, perturbation, quadratic
 
 """
     ImpuritySolver
@@ -120,17 +121,59 @@ struct CPT{L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: F
     perturbation::T
     periodization::P
 end
+@inline Parameters(cpt::CPT) = Parameters(cpt.solver)
+@inline update!(cpt::CPT; kwargs...) = (update!(cpt.solver; kwargs...); cpt)
 
 """
-    (cpt::CPT)(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
+    (cpt::Union{CPT, Algorithm{<:CPT}})(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
 
 Evaluate the Cluster Perturbation Theory Green's function at frequency `ω` and momentum `k`.
 When `k` is `nothing`, no periodization is performed even if `periodization=true`.
 """
+@inline (cpt::Algorithm{<:CPT})(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true) = (cpt.frontend)(ω, k; periodization)
 function (cpt::CPT)(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
     result = inv(inv(cpt.solver(ω))-matrix(cpt.perturbation, k))
     !isnothing(k) && periodization && (result = cpt.periodization(result, k))
     return result
+end
+
+"""
+    DynamicalSpectra{R<:ReciprocalSpace} <: Action
+
+Dynamical spectra using Cluster Perturbation Theory (CPT).
+"""
+struct DynamicalSpectra{R<:ReciprocalSpace} <: Action
+    reciprocalspace::R
+    energies::Vector{Float64}
+    DynamicalSpectra(reciprocalspace::ReciprocalSpace, energies::AbstractVector{<:Real}) = new{typeof(reciprocalspace)}(reciprocalspace, energies)
+end
+@inline options(::Type{<:Assignment{<:DynamicalSpectra}}) = (
+    η = "Lorentz broadening",
+    rescale = "function used to rescale the intensity of the spectrum at each energy-momentum point"
+)
+
+"""
+    DynamicalSpectraData{R<:ReciprocalSpace} <: Data
+
+Data of dynamical spectra computed from Cluster Perturbation Theory, including:
+
+1) `reciprocalspace::R`: reciprocal space on which the spectra are computed.
+2) `energies::Vector{Float64}`: energy sample points.
+3) `values::Matrix{Float64}`: spectral function A(ω,k) = -Im[Tr[G(ω,k)]] at each energy-momentum point.
+"""
+struct DynamicalSpectraData{R<:ReciprocalSpace} <: Data
+    reciprocalspace::R
+    energies::Vector{Float64}
+    values::Matrix{Float64}
+end
+function run!(cpt::Algorithm{<:CPT}, ds::Assignment{<:DynamicalSpectra}; η::Real=0.1, rescale::Function=identity, options...)
+    result = zeros(length(ds.action.energies), length(ds.action.reciprocalspace))
+    for (i, ω) in enumerate(ds.action.energies)
+        for (j, k) in enumerate(ds.action.reciprocalspace)
+            result[i, j] = rescale(-imag(tr(cpt(ω+1im*η, k))))
+        end
+    end
+    return DynamicalSpectraData(ds.action.reciprocalspace, ds.action.energies, result)
 end
 
 end

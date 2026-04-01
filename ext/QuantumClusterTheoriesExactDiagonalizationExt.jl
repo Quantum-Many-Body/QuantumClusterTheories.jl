@@ -1,10 +1,11 @@
 module QuantumClusterTheoriesExactDiagonalizationExt
 
-using ExactDiagonalization: Abelian, BandLanczosMethod, ED, EDKind, EDMatrixization, RetardedGreenFunction, Sector
+using ExactDiagonalization: Abelian, BandLanczosMethod, ED, EDKind, EDMatrixization, GreenFunctionMethod, RetardedGreenFunction, Sector
 using QuantumLattices: AbstractLattice, Generator, Hilbert, Lattice, Metric, Neighbors, OneAtLeast, OneOrMore, QuantumOperator, Table, Term, bonds, isintracell, kind, nneighbor, atol, eager, plain, rtol
 using QuantumClusterTheories: Periodization, operators, perturbation, quadratic
 using TightBindingApproximation: TBAKind
 import QuantumClusterTheories: CPT, ImpuritySolver
+import QuantumLattices: Parameters, update!
 
 """
     Cache
@@ -17,16 +18,28 @@ mutable struct Cache
 end
 
 """
-    EDSolver{E<:ED, G<:RetardedGreenFunction} <: ImpuritySolver
+    EDSolver{E<:ED, G<:RetardedGreenFunction, O<:QuantumOperator, M<:GreenFunctionMethod} <: ImpuritySolver
 
 Exact diagonalization based impurity solver computing the retarded Green's function with caching.
 """
-struct EDSolver{E<:ED, G<:RetardedGreenFunction} <: ImpuritySolver
-    ed::E
+mutable struct EDSolver{E<:ED, G<:RetardedGreenFunction, O<:QuantumOperator, M<:GreenFunctionMethod} <: ImpuritySolver
+    const ed::E
     gf::G
-    cache::Cache
+    const operators::Vector{O}
+    const method::M
+    const cache::Cache
 end
-@inline EDSolver(ed::ED, gf::RetardedGreenFunction) = EDSolver(ed, gf, Cache(0im, gf(0im)))
+@inline function EDSolver(ed::ED, gf::RetardedGreenFunction, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod)
+    return EDSolver(ed, gf, operators, method, Cache(0im, gf(0im)))
+end
+@inline Parameters(solver::EDSolver) = Parameters(solver.ed)
+@inline function update!(solver::EDSolver; kwargs...)
+    update!(solver.ed; kwargs...)
+    solver.gf = RetardedGreenFunction(solver.operators, solver.ed, solver.method)
+    solver.cache.ω = 0im
+    solver.cache.data .= solver.gf(0im)
+    return solver
+end
 
 """
     (solver::EDSolver)(ω::Number) -> Matrix{ComplexF64}
@@ -60,8 +73,9 @@ function ImpuritySolver(
     sectors = broadcast(Sector, OneOrMore(quantumnumbers), hilbert; table)
     matrixization = EDMatrixization{dtype}(table, sectors...)
     ed = ED{typeof(edkind)}(lattice, system, matrixization)
-    gf = RetardedGreenFunction(operators(TBAKind(typeof(quadratic(terms)), valtype(hilbert)), lattice, hilbert), ed, method; kwargs...)
-    return EDSolver(ed, gf)
+    ops = operators(TBAKind(typeof(quadratic(terms)), valtype(hilbert)), lattice, hilbert)
+    gf = RetardedGreenFunction(ops, ed, method; kwargs...)
+    return EDSolver(ed, gf, ops, method)
 end
 
 """
@@ -109,6 +123,15 @@ function blockdiag!(dest::Matrix{ComplexF64}, blocks::Vector{Int}, matrix::Funct
     end
     dest[:] = @view dest[permutation, permutation]
     return dest
+end
+@inline Parameters(solver::ComposedEDSolver) = Parameters(first(solver.representatives))
+@inline function update!(solver::ComposedEDSolver; kwargs...)
+    for rep in solver.representatives
+        update!(rep; kwargs...)
+    end
+    solver.cache.ω = 0im
+    solver.cache.data .= solver(0im)
+    return solver
 end
 
 """

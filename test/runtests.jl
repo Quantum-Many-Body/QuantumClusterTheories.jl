@@ -64,18 +64,10 @@ end
     U = Hubbard(:U, 8.0)
     μ = Onsite(:μ, -U.value/2)
     quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
-    cpt = CPT(unitcell, lattice, hilbert, (t, μ, U), quantumnumber)
-    emin = -10.0
-    emax = 10.0
-    N = 501
-    η = 0.1
-    es = LinRange(emin, emax, N)
+    cpt = Algorithm(:SquareHubbard, CPT(unitcell, lattice, hilbert, (t, μ, U), quantumnumber))
+
+    es = LinRange(-10.0, 10.0, 501)
     path = ReciprocalPath(reciprocals(unitcell), rectangle"Γ-X-M-Γ"; length=100)
-    data = zeros(length(es), length(path))
-    for (i, e) in enumerate(es)
-        for (j, k) in enumerate(path)
-            data[i, j] = -2*imag(tr(cpt(e+1im*η, k)))
-        end
-    end
-    Plots.savefig(Plots.plot(path, es, data), "Plots-Hubbard-Square-2x2-spectral.png")
+    spectra = cpt(:EB, DynamicalSpectra(path, es); η=0.1)
+    Plots.savefig(Plots.plot(spectra), "Plots-Hubbard-Square-2x2-spectral.png")
 end
