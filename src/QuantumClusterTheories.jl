@@ -122,13 +122,15 @@ struct CPT{L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: F
 end
 
 """
-    (cpt::CPT)(ω::Number) -> Matrix{ComplexF64}
-    (cpt::CPT)(ω::Number, k::AbstractVector{<:Number}) -> Matrix{ComplexF64}
+    (cpt::CPT)(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
 
-Evaluate the cluster perturbation theory single-particle Green's function.
-With only `ω`, returns the real-space CPT Green's function. With `k`, returns the momentum-space periodised Green's function.
+Evaluate the Cluster Perturbation Theory Green's function at frequency `ω` and momentum `k`.
+When `k` is `nothing`, no periodization is performed even if `periodization=true`.
 """
-@inline (cpt::CPT)(ω::Number) = inv(inv(cpt.solver(ω))-matrix(cpt.perturbation))
-@inline (cpt::CPT)(ω::Number, k::AbstractVector{<:Number}) = cpt.periodization(inv(inv(cpt.solver(ω))-matrix(cpt.perturbation, k)), k)
+function (cpt::CPT)(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
+    result = inv(inv(cpt.solver(ω))-matrix(cpt.perturbation, k))
+    !isnothing(k) && periodization && (result = cpt.periodization(result, k))
+    return result
+end
 
 end
