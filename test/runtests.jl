@@ -36,9 +36,9 @@ import Plots
         0.0 0.0 0.0 1.0 0.0 1.0 0.0 0.0
     ]
 
-    ops_lattice = operators(Fermionic(:TBA), lattice, hilbert)
-    ops_unitcell = operators(Fermionic(:TBA), unitcell, hilbert)
-    periodization = Periodization(ops_lattice, ops_unitcell, unitcell.vectors)
+    opsₗ = operators(Fermionic(:TBA), lattice, hilbert)
+    opsᵤ = operators(Fermionic(:TBA), unitcell, hilbert)
+    periodization = Periodization(opsₗ, opsᵤ, unitcell.vectors)
     @test periodization.coordinates == reduce(vcat, [[lattice[i], lattice[i]] for i in eachindex(lattice)])
     @test periodization.groups == [[1, 3, 5, 7], [2, 4, 6, 8]]
 

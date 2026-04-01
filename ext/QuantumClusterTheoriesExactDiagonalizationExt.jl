@@ -1,7 +1,7 @@
 module QuantumClusterTheoriesExactDiagonalizationExt
 
 using ExactDiagonalization: Abelian, BandLanczosMethod, ED, EDKind, EDMatrixization, RetardedGreenFunction, Sector
-using QuantumLattices: AbstractLattice, Generator, Hilbert, Metric, Neighbors, OneOrMore, QuantumOperator, Table, Term, bonds, isintracell, kind, nneighbor, atol, eager, plain, rtol
+using QuantumLattices: AbstractLattice, Generator, Hilbert, Lattice, Metric, Neighbors, OneAtLeast, OneOrMore, QuantumOperator, Table, Term, bonds, isintracell, kind, nneighbor, atol, eager, plain, rtol
 using QuantumClusterTheories: Periodization, operators, perturbation, quadratic
 using TightBindingApproximation: TBAKind
 import QuantumClusterTheories: CPT, ImpuritySolver
@@ -76,9 +76,126 @@ function CPT(
     solver = ImpuritySolver(lattice, hilbert, terms, quantumnumbers, method, dtype; neighbors)
     pert = perturbation(lattice, hilbert, terms; neighbors)
     tbakind = kind(pert)
-    ops_lattice = operators(tbakind, lattice, hilbert)
-    ops_unitcell = operators(tbakind, unitcell, hilbert)
-    periodization = Periodization(ops_lattice, ops_unitcell, unitcell.vectors)
+    opsₗ = operators(tbakind, lattice, hilbert)
+    opsᵤ = operators(tbakind, unitcell, hilbert)
+    periodization = Periodization(opsₗ, opsᵤ, unitcell.vectors)
+    return CPT(unitcell, lattice, solver, pert, periodization)
+end
+
+"""
+    ComposedEDSolver{E<:EDSolver} <: ImpuritySolver
+
+Composed exact diagonalization solver for partitioned clusters, computing block-diagonal retarded Green's function with caching.
+"""
+struct ComposedEDSolver{E<:EDSolver} <: ImpuritySolver
+    blocks::Vector{Int}
+    representatives::Vector{E}
+    permutation::Vector{Int}
+    cache::Cache
+end
+function ComposedEDSolver(blocks::AbstractVector{Int}, representatives::AbstractVector{<:EDSolver}, permutation::AbstractVector{Int})
+    ms = [representatives[block](0im) for block in blocks]
+    result = blockdiag!(zeros(ComplexF64, mapreduce(size, .+, ms)), blocks, block::Int->ms[block], permutation)
+    return ComposedEDSolver(blocks, representatives, permutation, Cache(0im, result))
+end
+function blockdiag!(dest::Matrix{ComplexF64}, blocks::Vector{Int}, matrix::Function, permutation::AbstractVector{Int})
+    row, col = 1, 1
+    for block in blocks
+        m = matrix(block)
+        inc_row, inc_col = size(m)
+        dest[row:row+inc_row-1, col:col+inc_col-1] = m
+        row += inc_row
+        col += inc_col
+    end
+    dest[:] = @view dest[permutation, permutation]
+    return dest
+end
+
+"""
+    (solver::ComposedEDSolver)(ω::Number) -> Matrix{ComplexF64}
+
+Evaluate the block-diagonal retarded Green's function at frequency `ω` using cached results when available.
+"""
+@inline function (solver::ComposedEDSolver)(ω::Number)
+    if ω≈solver.cache.ω
+        return solver.cache.data
+    else
+        solver.cache.ω = ω
+        return blockdiag!(fill!(solver.cache.data, 0), solver.blocks, block::Int->solver.representatives[block](ω), solver.permutation)
+    end
+end
+
+"""
+    ImpuritySolver(
+        lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, partition::OneOrMore{Pair}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
+        neighbors::Union{Int, Neighbors}=nneighbor(terms), kwargs...
+    ) -> ComposedEDSolver
+
+Construct an exact diagonalization based impurity solver for a partitioned lattice, where `partition` maps cluster indices to tuples of site clusters and quantum numbers.
+"""
+function ImpuritySolver(
+    lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, partition::OneOrMore{Pair}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
+    neighbors::Union{Int, Neighbors}=nneighbor(terms), kwargs...
+)
+    blocks = Int[]
+    sites = Int[]
+    for (block, (clusters, _)) in enumerate(OneOrMore(partition))
+        for cluster in OneOrMore(clusters)
+            push!(blocks, block)
+            append!(sites, cluster)
+        end
+    end
+    sites = sortperm(sites)
+    neighbors = isa(neighbors, Int) ? Neighbors(lattice, neighbors) : neighbors
+    representatives = [
+        begin
+            sublattice = Lattice(map(site->lattice[site], first(OneOrMore(clusters)))...)
+            ImpuritySolver(sublattice, hilbert, terms, quantumnumbers, method, dtype; neighbors, kwargs...) 
+        end
+        for (clusters, quantumnumbers) in OneOrMore(partition)
+    ]
+    permutation = invperm(sortperm(
+        operators(TBAKind(typeof(quadratic(terms)), valtype(hilbert)), lattice, hilbert);
+        by=op->sites[op.index.site]
+    ))
+    return ComposedEDSolver(blocks, representatives, permutation)
+end
+
+"""
+    CPT(
+        unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, partition::OneOrMore{Pair}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
+        neighbors::Union{Int, Neighbors}=nneighbor(terms), kwargs...
+    ) -> CPT
+
+Construct a cluster perturbation theory (CPT) frontend using exact diagonalization as the impurity solver with lattice partitioning.
+"""
+function CPT(
+    unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, partition::OneOrMore{Pair}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
+    neighbors::Union{Int, Neighbors}=nneighbor(terms), kwargs...
+)
+    solver = ImpuritySolver(lattice, hilbert, terms, partition, method, dtype; neighbors)
+    table = zeros(Int, length(lattice))
+    num = 1
+    for (clusters, _) in OneOrMore(partition)
+        for cluster in OneOrMore(clusters)
+            for site in cluster
+                table[site] = num
+            end
+            num += 1
+        end
+    end
+    pert = perturbation(
+        filter!(bonds(lattice, neighbors)) do bond
+            isintracell(bond) || return true
+            length(bond)==2 && return table[bond[1].site] ≠ table[bond[2].site]
+            return false
+        end,
+        hilbert, terms
+    )
+    tbakind = kind(pert)
+    opsₗ = operators(tbakind, lattice, hilbert)
+    opsᵤ = operators(tbakind, unitcell, hilbert)
+    periodization = Periodization(opsₗ, opsᵤ, unitcell.vectors)
     return CPT(unitcell, lattice, solver, pert, periodization)
 end
 
