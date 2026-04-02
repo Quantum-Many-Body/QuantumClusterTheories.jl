@@ -2,8 +2,9 @@ module QuantumClusterTheoriesExactDiagonalizationExt
 
 using ExactDiagonalization: Abelian, BandLanczosMethod, ED, EDKind, EDMatrixization, GreenFunctionMethod, RetardedGreenFunction, Sector
 using QuantumLattices: AbstractLattice, Generator, Hilbert, Lattice, Metric, Neighbors, OneAtLeast, OneOrMore, QuantumOperator, Table, Term, bonds, isintracell, kind, nneighbor, atol, eager, plain, rtol
-using QuantumClusterTheories: Periodization, operators, perturbation, quadratic
+using QuantumClusterTheories: Periodization, operators, perturbation, quadratic, qcttimer
 using TightBindingApproximation: TBAKind
+using TimerOutputs: TimerOutput
 import QuantumClusterTheories: CPT, ImpuritySolver
 import QuantumLattices: Parameters, update!
 
@@ -33,9 +34,9 @@ end
     return EDSolver(ed, gf, operators, method, Cache(0im, gf(0im)))
 end
 @inline Parameters(solver::EDSolver) = Parameters(solver.ed)
-@inline function update!(solver::EDSolver; kwargs...)
+@inline function update!(solver::EDSolver; timer::TimerOutput=qcttimer, kwargs...)
     update!(solver.ed; kwargs...)
-    solver.gf = RetardedGreenFunction(solver.operators, solver.ed, solver.method)
+    solver.gf = RetardedGreenFunction(solver.operators, solver.ed, solver.method; timer)
     solver.cache.ω = 0im
     solver.cache.data .= solver.gf(0im)
     return solver
@@ -65,7 +66,7 @@ Construct an exact diagonalization based impurity solver from a lattice, hilbert
 """
 function ImpuritySolver(
     lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
-    neighbors::Union{Int, Neighbors}=nneighbor(terms), kwargs...
+    neighbors::Union{Int, Neighbors}=nneighbor(terms), timer::TimerOutput=qcttimer, kwargs...
 )
     system = Generator(filter!(isintracell, bonds(lattice, neighbors)), hilbert, OneOrMore(terms), plain, eager; half=false)
     edkind = EDKind(hilbert)
@@ -74,7 +75,7 @@ function ImpuritySolver(
     matrixization = EDMatrixization{dtype}(table, sectors...)
     ed = ED{typeof(edkind)}(lattice, system, matrixization)
     ops = operators(TBAKind(typeof(quadratic(terms)), valtype(hilbert)), lattice, hilbert)
-    gf = RetardedGreenFunction(ops, ed, method; kwargs...)
+    gf = RetardedGreenFunction(ops, ed, method; timer, kwargs...)
     return EDSolver(ed, gf, ops, method)
 end
 
@@ -85,9 +86,9 @@ Construct a cluster perturbation theory (CPT) frontend using exact diagonalizati
 """
 function CPT(
     unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
-    neighbors::Union{Int, Neighbors}=nneighbor(terms), atol=atol, rtol=rtol, kwargs...
+    neighbors::Union{Int, Neighbors}=nneighbor(terms), atol=atol, rtol=rtol, timer::TimerOutput=qcttimer, kwargs...
 )
-    solver = ImpuritySolver(lattice, hilbert, terms, quantumnumbers, method, dtype; neighbors)
+    solver = ImpuritySolver(lattice, hilbert, terms, quantumnumbers, method, dtype; neighbors, timer)
     pert = perturbation(lattice, hilbert, terms; neighbors)
     tbakind = kind(pert)
     opsₗ = operators(tbakind, lattice, hilbert)
@@ -125,9 +126,9 @@ function blockdiag!(dest::Matrix{ComplexF64}, blocks::Vector{Int}, matrix::Funct
     return dest
 end
 @inline Parameters(solver::ComposedEDSolver) = Parameters(first(solver.representatives))
-@inline function update!(solver::ComposedEDSolver; kwargs...)
+@inline function update!(solver::ComposedEDSolver; timer::TimerOutput=qcttimer, kwargs...)
     for rep in solver.representatives
-        update!(rep; kwargs...)
+        update!(rep; timer, kwargs...)
     end
     solver.cache.ω = 0im
     solver.cache.data .= solver(0im)
@@ -158,7 +159,7 @@ Construct an exact diagonalization based impurity solver for a partitioned latti
 """
 function ImpuritySolver(
     lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, partition::OneOrMore{Pair}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
-    neighbors::Union{Int, Neighbors}=nneighbor(terms), kwargs...
+    neighbors::Union{Int, Neighbors}=nneighbor(terms), timer::TimerOutput=qcttimer, kwargs...
 )
     blocks = Int[]
     sites = Int[]
@@ -175,7 +176,7 @@ function ImpuritySolver(
             subsites = first(OneOrMore(clusters))
             sublattice = Lattice(map(site->lattice[site], subsites)...)
             subhilbert = Hilbert([hilbert[site] for site in subsites])
-            ImpuritySolver(sublattice, subhilbert, terms, quantumnumbers, method, dtype; neighbors, kwargs...)
+            ImpuritySolver(sublattice, subhilbert, terms, quantumnumbers, method, dtype; neighbors, timer, kwargs...)
         end
         for (clusters, quantumnumbers) in OneOrMore(partition)
     ]
@@ -196,9 +197,9 @@ Construct a cluster perturbation theory (CPT) frontend using exact diagonalizati
 """
 function CPT(
     unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, partition::OneOrMore{Pair}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
-    neighbors::Union{Int, Neighbors}=nneighbor(terms), kwargs...
+    neighbors::Union{Int, Neighbors}=nneighbor(terms), timer::TimerOutput=qcttimer, kwargs...
 )
-    solver = ImpuritySolver(lattice, hilbert, terms, partition, method, dtype; neighbors)
+    solver = ImpuritySolver(lattice, hilbert, terms, partition, method, dtype; neighbors, timer)
     table = zeros(Int, length(lattice))
     num = 1
     for (clusters, _) in OneOrMore(partition)

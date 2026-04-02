@@ -1,13 +1,21 @@
 module QuantumClusterTheories
 
 using LinearAlgebra: I, dot, inv, tr
+using TimerOutputs: TimerOutput
 using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
-using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, rtol
+using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, rtol, update
 using StaticArrays: SVector
 using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
 import QuantumLattices: Parameters, options, run!, update!
 
-export CPT, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, operators, perturbation, quadratic
+export CPT, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, operators, perturbation, quadratic, qcttimer
+
+"""
+    const qcttimer
+
+Default shared timer for all quantum cluster theory methods.
+"""
+const qcttimer = TimerOutput()
 
 """
     ImpuritySolver
@@ -122,7 +130,14 @@ struct CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<
     periodization::P
 end
 @inline Parameters(cpt::CPT) = Parameters(cpt.solver)
-@inline update!(cpt::CPT; kwargs...) = (update!(cpt.solver; kwargs...); cpt)
+@inline update!(cpt::CPT; timer::TimerOutput=qcttimer, kwargs...) = (update!(cpt.solver; timer, kwargs...); cpt)
+@inline function update!(cpt::Algorithm{<:CPT}; kwargs...)
+    if length(kwargs)>0
+        cpt.parameters = update(cpt.parameters; kwargs...)
+        update!(cpt.frontend; timer=cpt.timer, cpt.map(cpt.parameters)...)
+    end
+    return cpt
+end
 
 """
     (cpt::Union{CPT, Algorithm{<:CPT}})(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
