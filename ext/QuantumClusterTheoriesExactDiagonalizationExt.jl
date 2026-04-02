@@ -172,8 +172,10 @@ function ImpuritySolver(
     neighbors = isa(neighbors, Int) ? Neighbors(lattice, neighbors) : neighbors
     representatives = [
         begin
-            sublattice = Lattice(map(site->lattice[site], first(OneOrMore(clusters)))...)
-            ImpuritySolver(sublattice, hilbert, terms, quantumnumbers, method, dtype; neighbors, kwargs...) 
+            subsites = first(OneOrMore(clusters))
+            sublattice = Lattice(map(site->lattice[site], subsites)...)
+            subhilbert = Hilbert([hilbert[site] for site in subsites])
+            ImpuritySolver(sublattice, subhilbert, terms, quantumnumbers, method, dtype; neighbors, kwargs...)
         end
         for (clusters, quantumnumbers) in OneOrMore(partition)
     ]

@@ -1,6 +1,6 @@
 module QuantumClusterTheories
 
-using LinearAlgebra: dot, inv, tr
+using LinearAlgebra: I, dot, inv, tr
 using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
 using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, rtol
 using StaticArrays: SVector
@@ -110,12 +110,12 @@ function (periodization::Periodization)(data::AbstractMatrix{<:Number}, k::Abstr
 end
 
 """
-    CPT{L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: Frontend
+    CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: Frontend
 
 Cluster perturbation theory (CPT) frontend combining a unit cell, full lattice, impurity solver, perturbation, and periodization.
 """
-struct CPT{L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: Frontend
-    unitcell::L
+struct CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: Frontend
+    unitcell::U
     lattice::L
     solver::I
     perturbation::T
@@ -132,7 +132,8 @@ When `k` is `nothing`, no periodization is performed even if `periodization=true
 """
 @inline (cpt::Algorithm{<:CPT})(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true) = (cpt.frontend)(ω, k; periodization)
 function (cpt::CPT)(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
-    result = inv(inv(cpt.solver(ω))-matrix(cpt.perturbation, k))
+    G, V = cpt.solver(ω), matrix(cpt.perturbation, k)
+    result = G / (I-V*G)
     !isnothing(k) && periodization && (result = cpt.periodization(result, k))
     return result
 end

@@ -72,3 +72,66 @@ end
     Plots.savefig(Plots.plot(spectra), "Plots-Hubbard-Square-2x2-spectral.png")
     Makie.save("Makie-Hubbard-Square-2x2-spectral.png", Makie.plot(spectra))
 end
+
+@testset begin "Haldane-Hubbard"
+    parameters = (t=Complex(-1.0), t′=Complex(-0.2), U=4.0)
+    @inline parammap(parameters::NamedTuple) = (μ=-parameters.U/2, U=parameters.U)
+
+    unitcell = Lattice([0.0, 0.0], [0.0, √3/3]; vectors=[[1.0, 0.0], [0.5, √3/2]])
+    lattice = Lattice(
+        [0.0, 0.0], [0.0, √3/3], [0.5, √3/2], [0.5, -√3/6], [1.0, 0.0], [1.0, √3/3];
+        vectors=[[1.5, √3/2], [1.5, -√3/2]]
+    )
+    hilbert = Hilbert(Fock{:f}(1, 2), length(lattice))
+
+    t = Hopping(:t, parameters.t, 1; ismodulatable=false)
+    t′ = Hopping(:t′, parameters.t′, 2;
+        amplitude=bond::Bond->1im*cos(3*azimuth(rcoordinate(bond)))*(-1)^(bond[1].site%2),
+        ismodulatable=false
+    )
+    μ = Onsite(:μ, parammap(parameters).μ)
+    U = Hubbard(:U, parammap(parameters).U)
+
+    quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
+    haldane = Algorithm(
+        :HaldaneHubbard,
+        CPT(unitcell, lattice, hilbert, deepcopy((t, t′, μ, U)), quantumnumber, BandLanczosMethod(keepvecs=true)),
+        parameters,
+        parammap
+    )
+
+    es = LinRange(-4.0, 4.0, 201)
+    path = ReciprocalPath(reciprocals(unitcell), hexagon"Γ-K-M-Γ"; length=100)
+    spectra = haldane(:EB, DynamicalSpectra(path, es); η=0.04)
+    Plots.savefig(Plots.plot(spectra), "Plots-Haldane-Hubbard-Topological.png")
+    Makie.save("Makie-Haldane-Hubbard-Topological.png", Makie.plot(spectra))
+
+    update!(haldane; U=4.6)
+    spectra = haldane(:EB, DynamicalSpectra(path, es); η=0.04)
+    Plots.savefig(Plots.plot(spectra), "Plots-Haldane-Hubbard-Transition.png")
+    Makie.save("Makie-Haldane-Hubbard-Transition.png", Makie.plot(spectra))
+
+    update!(haldane; U=5.0)
+    spectra = haldane(:EB, DynamicalSpectra(path, es); η=0.04)
+    Plots.savefig(Plots.plot(spectra), "Plots-Haldane-Hubbard-Trivial.png")
+    Makie.save("Makie-Haldane-Hubbard-Trivial.png", Makie.plot(spectra))
+
+    num = 8
+    edge = Lattice(lattice, (1, num), ('P', 'O'))
+    hilbert_edge = Hilbert(Fock{:f}(1, 2), length(edge))
+    haldane_edge = Algorithm(
+        :HaldaneHubbardEdge,
+        CPT(edge, edge, hilbert_edge, deepcopy((t, t′, μ, U)), ntuple(i->(6(i-1)+1, 6(i-1)+2, 6(i-1)+3, 6(i-1)+4, 6(i-1)+5, 6(i-1)+6), num)=>quantumnumber, BandLanczosMethod(keepvecs=true)),
+        parameters,
+        parammap
+    );
+    path_edge = ReciprocalPath(reciprocals(edge), -0.5=>0.5; length=100)
+    spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04)
+    Plots.savefig(Plots.plot(spectra_edge), "Plots-Haldane-Hubbard-Edge-Topological.png")
+    Makie.save("Makie-Haldane-Hubbard-Edge-Topological.png", Makie.plot(spectra_edge))
+
+    update!(haldane_edge; U=5.0)
+    spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04)
+    Plots.savefig(Plots.plot(spectra_edge), "Plots-Haldane-Hubbard-Edge-Trivial.png")
+    Makie.save("Makie-Haldane-Hubbard-Edge-Trivial.png", Makie.plot(spectra_edge))
+end
