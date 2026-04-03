@@ -110,14 +110,12 @@ In the topological phase, the system has a finite bulk gap and hosts **gapless c
 **Bulk spectrum:**
 ```@example haldane-hubbard-cpt
 using Logging; Logging.disable_logging(Logging.Info)  # hide
-update!(haldane; U=4.0);
 spectra_topological = haldane(:EB, DynamicalSpectra(path, es); η=0.04);
 plot(spectra_topological, title="Bulk (U=4.0, Topological)")
 ```
 
 **Edge spectrum:**
 ```@example haldane-hubbard-cpt
-update!(haldane_edge; U=4.0);
 spectra_edge_topological = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04);
 plot(spectra_edge_topological, title="Edge (U=4.0, Gapless Edge States)")
 ```
