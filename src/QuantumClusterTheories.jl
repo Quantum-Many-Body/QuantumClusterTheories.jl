@@ -130,7 +130,11 @@ struct CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<
     periodization::P
 end
 @inline Parameters(cpt::CPT) = Parameters(cpt.solver)
-@inline update!(cpt::CPT; timer::TimerOutput=qcttimer, kwargs...) = (update!(cpt.solver; timer, kwargs...); cpt)
+@inline function update!(cpt::CPT; timer::TimerOutput=qcttimer, kwargs...)
+    update!(cpt.solver; timer, kwargs...)
+    update!(cpt.perturbation; kwargs...)
+    return cpt
+end
 @inline function update!(cpt::Algorithm{<:CPT}; kwargs...)
     if length(kwargs)>0
         cpt.parameters = update(cpt.parameters; kwargs...)
