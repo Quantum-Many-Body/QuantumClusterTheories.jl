@@ -3,12 +3,12 @@ module QuantumClusterTheories
 using LinearAlgebra: I, dot, inv, tr
 using TimerOutputs: TimerOutput
 using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
-using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, rtol, update
+using QuantumLattices: atol, bonds, getcontent, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, rtol, update
 using StaticArrays: SVector
 using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
 import QuantumLattices: Parameters, options, run!, update!
 
-export CPT, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, operators, perturbation, quadratic, qcttimer
+export CPT, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, QCT, QuantumClusterTheory, operators, perturbation, quadratic, qcttimer
 
 """
     const qcttimer
@@ -118,28 +118,37 @@ function (periodization::Periodization)(data::AbstractMatrix{<:Number}, k::Abstr
 end
 
 """
-    CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: Frontend
+    abstract type QuantumClusterTheory <: Frontend end
+
+Abstract base type for quantum cluster theories, which provide a framework for solving quantum many-body problems using cluster-based approximations.
+All concrete quantum cluster theory implementations should subtype this abstract type.
+"""
+abstract type QuantumClusterTheory <: Frontend end
+const QCT = QuantumClusterTheory
+@inline Parameters(qct::QuantumClusterTheory) = Parameters(getcontent(qct, :solver))
+@inline function update!(qct::Algorithm{<:QuantumClusterTheory}; kwargs...)
+    if length(kwargs)>0
+        qct.parameters = update(qct.parameters; kwargs...)
+        update!(qct.frontend; timer=qct.timer, qct.map(qct.parameters)...)
+    end
+    return qct
+end
+
+"""
+    CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: QuantumClusterTheory
 
 Cluster perturbation theory (CPT) frontend combining a unit cell, full lattice, impurity solver, perturbation, and periodization.
 """
-struct CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: Frontend
+struct CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: QuantumClusterTheory
     unitcell::U
     lattice::L
     solver::I
     perturbation::T
     periodization::P
 end
-@inline Parameters(cpt::CPT) = Parameters(cpt.solver)
 @inline function update!(cpt::CPT; timer::TimerOutput=qcttimer, kwargs...)
     update!(cpt.solver; timer, kwargs...)
     update!(cpt.perturbation; kwargs...)
-    return cpt
-end
-@inline function update!(cpt::Algorithm{<:CPT}; kwargs...)
-    if length(kwargs)>0
-        cpt.parameters = update(cpt.parameters; kwargs...)
-        update!(cpt.frontend; timer=cpt.timer, cpt.map(cpt.parameters)...)
-    end
     return cpt
 end
 
@@ -160,7 +169,7 @@ end
 """
     DynamicalSpectra{R<:ReciprocalSpace} <: Action
 
-Dynamical spectra using Cluster Perturbation Theory (CPT).
+Dynamical spectra.
 """
 struct DynamicalSpectra{R<:ReciprocalSpace} <: Action
     reciprocalspace::R
@@ -175,7 +184,7 @@ end
 """
     DynamicalSpectraData{R<:ReciprocalSpace} <: Data
 
-Data of dynamical spectra computed from Cluster Perturbation Theory, including:
+Data of dynamical spectra computed from quantum cluster theory, including:
 
 1) `reciprocalspace::R`: reciprocal space on which the spectra are computed.
 2) `energies::Vector{Float64}`: energy sample points.
@@ -186,11 +195,11 @@ struct DynamicalSpectraData{R<:ReciprocalSpace} <: Data
     energies::Vector{Float64}
     values::Matrix{Float64}
 end
-function run!(cpt::Algorithm{<:CPT}, ds::Assignment{<:DynamicalSpectra}; η::Real=0.1, rescale::Function=identity, options...)
+function run!(qct::Algorithm{<:QuantumClusterTheory}, ds::Assignment{<:DynamicalSpectra}; η::Real=0.1, rescale::Function=identity, options...)
     result = zeros(length(ds.action.energies), length(ds.action.reciprocalspace))
     for (i, ω) in enumerate(ds.action.energies)
         for (j, k) in enumerate(ds.action.reciprocalspace)
-            result[i, j] = rescale(-imag(tr(cpt(ω+1im*η, k))))
+            result[i, j] = rescale(-imag(tr(qct(ω+1im*η, k))))
         end
     end
     return DynamicalSpectraData(ds.action.reciprocalspace, ds.action.energies, result)
