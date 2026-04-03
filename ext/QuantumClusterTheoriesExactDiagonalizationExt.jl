@@ -2,7 +2,7 @@ module QuantumClusterTheoriesExactDiagonalizationExt
 
 using ExactDiagonalization: Abelian, BandLanczosMethod, ED, EDKind, EDMatrixization, GreenFunctionMethod, RetardedGreenFunction, Sector
 using QuantumLattices: AbstractLattice, Generator, Hilbert, Lattice, Metric, Neighbors, OneAtLeast, OneOrMore, QuantumOperator, Table, Term, bonds, isintracell, kind, nneighbor, atol, eager, plain, rtol
-using QuantumClusterTheories: Periodization, operators, perturbation, quadratic, qcttimer
+using QuantumClusterTheories: Periodization, Perturbation, QCT, operators, qcttimer, quadratic
 using TightBindingApproximation: TBAKind
 using TimerOutputs: TimerOutput
 import QuantumClusterTheories: CPT, ImpuritySolver
@@ -89,12 +89,12 @@ function CPT(
     neighbors::Union{Int, Neighbors}=nneighbor(terms), atol=atol, rtol=rtol, timer::TimerOutput=qcttimer, kwargs...
 )
     solver = ImpuritySolver(lattice, hilbert, terms, quantumnumbers, method, dtype; neighbors, timer)
-    pert = perturbation(lattice, hilbert, terms; neighbors)
+    pert = Perturbation(lattice, hilbert, terms; neighbors)
     tbakind = kind(pert)
     opsₗ = operators(tbakind, lattice, hilbert)
     opsᵤ = operators(tbakind, unitcell, hilbert)
     periodization = Periodization(opsₗ, opsᵤ, unitcell.vectors)
-    return CPT(unitcell, lattice, solver, pert, periodization)
+    return QCT(unitcell, lattice, solver, pert, periodization)
 end
 
 """
@@ -210,7 +210,7 @@ function CPT(
             num += 1
         end
     end
-    pert = perturbation(
+    pert = Perturbation(
         filter!(bonds(lattice, neighbors)) do bond
             isintracell(bond) || return true
             length(bond)==2 && return table[bond[1].site] ≠ table[bond[2].site]
@@ -222,7 +222,7 @@ function CPT(
     opsₗ = operators(tbakind, lattice, hilbert)
     opsᵤ = operators(tbakind, unitcell, hilbert)
     periodization = Periodization(opsₗ, opsᵤ, unitcell.vectors)
-    return CPT(unitcell, lattice, solver, pert, periodization)
+    return QCT(unitcell, lattice, solver, pert, periodization)
 end
 
 end # module

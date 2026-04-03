@@ -24,8 +24,9 @@ import Plots
     terms = (Hopping(:t, 1.0, 1), Hubbard(:U, 0.0))
     @test quadratic(terms) == (terms[1],)
 
-    pert = perturbation(lattice, hilbert, terms)
-    @test matrix(pert) == [
+    pert = Perturbation(lattice, hilbert, terms)
+    @test kind(pert) == kind(typeof(pert)) == Fermionic(:TBA)
+    @test pert() == [
         0.0 0.0 1.0 0.0 1.0 0.0 0.0 0.0;
         0.0 0.0 0.0 1.0 0.0 1.0 0.0 0.0;
         1.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0;
@@ -56,7 +57,7 @@ import Plots
     @test cpt(ω, k) ≈ inv(ω*I-[2cos(k[1])+2cos(k[2]) 0; 0 2cos(k[1])+2cos(k[2])])
 end
 
-@testset begin "Square-Hubbard-Spectral"
+@testset "Square-Hubbard-Spectral" begin
     unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
     lattice = Lattice(unitcell, (2, 2), ('P', 'P'))
     hilbert = Hilbert(site=>Fock{:f}(1, 2) for site in eachindex(lattice))
@@ -73,7 +74,7 @@ end
     Makie.save("Makie-Hubbard-Square-2x2-spectral.png", Makie.plot(spectra))
 end
 
-@testset begin "Haldane-Hubbard"
+@testset "Haldane-Hubbard" begin
     parameters = (t=Complex(-1.0), t′=Complex(-0.2), U=4.0)
     @inline parammap(parameters::NamedTuple) = (μ=-parameters.U/2, U=parameters.U)
 

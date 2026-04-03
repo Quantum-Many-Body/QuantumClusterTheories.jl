@@ -3,12 +3,12 @@ module QuantumClusterTheories
 using LinearAlgebra: I, dot, inv, tr
 using TimerOutputs: TimerOutput
 using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
-using QuantumLattices: atol, bonds, getcontent, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, rtol, update
+using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, rtol, update
 using StaticArrays: SVector
 using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
-import QuantumLattices: Parameters, options, run!, update!
+import QuantumLattices: Parameters, kind, options, run!, update!
 
-export CPT, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, QCT, QuantumClusterTheory, operators, perturbation, quadratic, qcttimer
+export CPT, CPTPerturbation, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, Perturbation, QCT, operators, quadratic, qcttimer
 
 """
     const qcttimer
@@ -16,14 +16,6 @@ export CPT, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodizatio
 Default shared timer for all quantum cluster theory methods.
 """
 const qcttimer = TimerOutput()
-
-"""
-    ImpuritySolver
-
-Abstract type for impurity solvers used in quantum cluster theory calculations.
-Subtypes must implement the call syntax `solver(ω)` to return the solver's response function at frequency `ω`.
-"""
-abstract type ImpuritySolver end
 
 """
     operators(tbakind::TBAKind{:TBA}, lattice::AbstractLattice, hilbert::Hilbert{<:Fock}, table::Table=Table(hilbert, Metric(tbakind, hilbert))) -> Vector{<:CoordinatedIndex}
@@ -42,32 +34,58 @@ function operators(tbakind::TBAKind{:BdG}, lattice::AbstractLattice, hilbert::Hi
 end
 
 """
-    perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms)) -> TBA
-    perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}) -> TBA
-
-Construct a tight-binding approximation (TBA) object by keeping only the quadratic (pairwise) interaction terms.
-
-The first method extracts inter-cellular bonds from the lattice and delegates to the second method.
-The second method takes bonds directly and constructs the TBA from the given `bonds`, `hilbert` space, and `terms`.
-"""
-@inline function perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms))
-    return perturbation(filter!(!isintracell, bonds(lattice, neighbors)), hilbert, terms)
-end
-function perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term})
-    terms = quadratic(OneOrMore(terms))
-    kind = TBAKind(typeof(terms), valtype(hilbert))
-    H = Generator(bonds, hilbert, terms, plain, lazy; half=false)
-    quadraticization = Quadraticization{typeof(kind)}(Table(hilbert, Metric(kind, hilbert)))
-    commt = commutator(kind, hilbert)
-    return TBA{typeof(kind)}(H, quadraticization, commt)
-end
-
-"""
     quadratic(terms::OneAtLeast{Term}) -> Tuple
 
 Extract the quadratic (rank-2) terms from a collection of terms.
 """
 @generated quadratic(terms::OneAtLeast{Term}) = Expr(:tuple, [:(terms[$i]) for (i, T) in enumerate(fieldtypes(terms)) if rank(T)==2]...)
+
+"""
+    ImpuritySolver
+
+Abstract type for impurity solvers used in quantum cluster theory calculations.
+Subtypes must implement the call syntax `solver(ω)` to return the solver's response function at frequency `ω`.
+"""
+abstract type ImpuritySolver end
+
+"""
+    Perturbation
+
+Abstract type for perturbations in quantum cluster theory.
+Subtypes must implement `kind`, `update!`, and the call syntax `perturbation(k)` returning the perturbation matrix at momentum `k`.
+"""
+abstract type Perturbation end
+@inline kind(perturbation::Perturbation) = kind(typeof(perturbation))
+
+"""
+    CPTPerturbation{V<:TBA} <: Perturbation
+
+CPT (cluster perturbation theory) perturbation containing the intercluster quadratic terms of a system.
+"""
+struct CPTPerturbation{V<:TBA} <: Perturbation
+    intercluster::V
+end
+@inline kind(::Type{<:CPTPerturbation{V}}) where {V<:TBA} = kind(V)
+@inline update!(perturbation::CPTPerturbation; parameters...) = (update!(perturbation.intercluster; parameters...); perturbation)
+@inline (perturbation::CPTPerturbation)(k::Union{AbstractVector{<:Number}, Nothing}=nothing) = matrix(perturbation.intercluster, k)
+
+"""
+    Perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms)) -> CPTPerturbation
+    Perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}) -> CPTPerturbation
+
+Construct a CPT perturbation from lattice or bonds, hilbert space and terms.
+"""
+@inline function Perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms))
+    return Perturbation(filter!(!isintracell, bonds(lattice, neighbors)), hilbert, terms)
+end
+function Perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term})
+    terms = quadratic(OneOrMore(terms))
+    kind = TBAKind(typeof(terms), valtype(hilbert))
+    H = Generator(bonds, hilbert, terms, plain, lazy; half=false)
+    quadraticization = Quadraticization{typeof(kind)}(Table(hilbert, Metric(kind, hilbert)))
+    commt = commutator(kind, hilbert)
+    return CPTPerturbation(TBA{typeof(kind)}(H, quadraticization, commt))
+end
 
 """
     Periodization{N}
@@ -118,53 +136,51 @@ function (periodization::Periodization)(data::AbstractMatrix{<:Number}, k::Abstr
 end
 
 """
-    abstract type QuantumClusterTheory <: Frontend end
+    QCT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:Perturbation, P<:Periodization} <: Frontend
 
-Abstract base type for quantum cluster theories, which provide a framework for solving quantum many-body problems using cluster-based approximations.
-All concrete quantum cluster theory implementations should subtype this abstract type.
+Quantum cluster theory frontend that combines an impurity solver, perturbation, and crystallographic periodization to compute the Green's function of a system.
 """
-abstract type QuantumClusterTheory <: Frontend end
-const QCT = QuantumClusterTheory
-@inline Parameters(qct::QuantumClusterTheory) = Parameters(getcontent(qct, :solver))
-@inline function update!(qct::Algorithm{<:QuantumClusterTheory}; kwargs...)
-    if length(kwargs)>0
-        qct.parameters = update(qct.parameters; kwargs...)
+struct QCT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:Perturbation, P<:Periodization} <: Frontend
+    unitcell::U
+    lattice::L
+    solver::I
+    perturbation::V
+    periodization::P
+end
+@inline Parameters(qct::QCT) = Parameters(qct.solver)
+@inline function update!(qct::Algorithm{<:QCT}; parameters...)
+    if length(parameters)>0
+        qct.parameters = update(qct.parameters; parameters...)
         update!(qct.frontend; timer=qct.timer, qct.map(qct.parameters)...)
     end
     return qct
 end
-
-"""
-    CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: QuantumClusterTheory
-
-Cluster perturbation theory (CPT) frontend combining a unit cell, full lattice, impurity solver, perturbation, and periodization.
-"""
-struct CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, T<:TBA, P<:Periodization} <: QuantumClusterTheory
-    unitcell::U
-    lattice::L
-    solver::I
-    perturbation::T
-    periodization::P
-end
-@inline function update!(cpt::CPT; timer::TimerOutput=qcttimer, kwargs...)
-    update!(cpt.solver; timer, kwargs...)
-    update!(cpt.perturbation; kwargs...)
-    return cpt
+@inline function update!(qct::QCT; timer::TimerOutput=qcttimer, parameters...)
+    update!(qct.solver; timer, parameters...)
+    update!(qct.perturbation; parameters...)
+    return qct
 end
 
 """
-    (cpt::Union{CPT, Algorithm{<:CPT}})(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
+    (qct::Union{QCT, Algorithm{<:QCT}})(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
 
-Evaluate the Cluster Perturbation Theory Green's function at frequency `ω` and momentum `k`.
+Evaluate the Green's function at frequency `ω` and momentum `k` by use of quantum cluster theory.
 When `k` is `nothing`, no periodization is performed even if `periodization=true`.
 """
-@inline (cpt::Algorithm{<:CPT})(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true) = (cpt.frontend)(ω, k; periodization)
-function (cpt::CPT)(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
-    G, V = cpt.solver(ω), matrix(cpt.perturbation, k)
+@inline (qct::Algorithm{<:QCT})(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true) = (qct.frontend)(ω, k; periodization)
+function (qct::QCT)(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
+    G, V = qct.solver(ω), qct.perturbation(k)
     result = G / (I-V*G)
-    !isnothing(k) && periodization && (result = cpt.periodization(result, k))
+    !isnothing(k) && periodization && (result = qct.periodization(result, k))
     return result
 end
+
+"""
+    CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:CPTPerturbation, P<:Periodization}
+
+Alias for [`QCT`](@ref) with `V<:CPTPerturbation`, representing cluster perturbation theory.
+"""
+const CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:CPTPerturbation, P<:Periodization} = QCT{U, L, I, V, P}
 
 """
     DynamicalSpectra{R<:ReciprocalSpace} <: Action
@@ -195,7 +211,7 @@ struct DynamicalSpectraData{R<:ReciprocalSpace} <: Data
     energies::Vector{Float64}
     values::Matrix{Float64}
 end
-function run!(qct::Algorithm{<:QuantumClusterTheory}, ds::Assignment{<:DynamicalSpectra}; η::Real=0.1, rescale::Function=identity, options...)
+function run!(qct::Algorithm{<:QCT}, ds::Assignment{<:DynamicalSpectra}; η::Real=0.1, rescale::Function=identity, options...)
     result = zeros(length(ds.action.energies), length(ds.action.reciprocalspace))
     for (i, ω) in enumerate(ds.action.energies)
         for (j, k) in enumerate(ds.action.reciprocalspace)
