@@ -31,7 +31,8 @@ mutable struct EDSolver{E<:ED, G<:RetardedGreenFunction, O<:QuantumOperator, M<:
     const cache::Cache
     const timer::TimerOutput
 end
-@inline function EDSolver(ed::ED, gf::RetardedGreenFunction, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod; timer::TimerOutput=qcttimer)
+@inline function EDSolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod; timer::TimerOutput=qcttimer)
+    gf = RetardedGreenFunction(operators, ed, method; timer)
     return EDSolver(ed, gf, operators, method, Cache(0im, gf(0im)), timer)
 end
 @inline Parameters(solver::EDSolver) = Parameters(solver.ed)
@@ -76,8 +77,7 @@ function ImpuritySolver(
     matrixization = EDMatrixization{dtype}(table, sectors...)
     ed = ED{typeof(edkind)}(lattice, system, matrixization)
     ops = operators(TBAKind(typeof(quadratic(terms)), valtype(hilbert)), lattice, hilbert)
-    gf = RetardedGreenFunction(ops, ed, method; timer)
-    return EDSolver(ed, gf, ops, method; timer)
+    return EDSolver(ed, ops, method; timer)
 end
 
 """
