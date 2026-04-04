@@ -3,7 +3,7 @@ module QuantumClusterTheories
 using LinearAlgebra: I, dot, inv, tr
 using TimerOutputs: TimerOutput
 using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
-using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, rtol, update
+using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, rtol
 using StaticArrays: SVector
 using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
 import QuantumLattices: Parameters, kind, options, run!, update!
@@ -148,15 +148,8 @@ struct QCT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:Perturb
     periodization::P
 end
 @inline Parameters(qct::QCT) = Parameters(qct.solver)
-@inline function update!(qct::Algorithm{<:QCT}; parameters...)
-    if length(parameters)>0
-        qct.parameters = update(qct.parameters; parameters...)
-        update!(qct.frontend; timer=qct.timer, qct.map(qct.parameters)...)
-    end
-    return qct
-end
-@inline function update!(qct::QCT; timer::TimerOutput=qcttimer, parameters...)
-    update!(qct.solver; timer, parameters...)
+@inline function update!(qct::QCT; parameters...)
+    update!(qct.solver; parameters...)
     update!(qct.perturbation; parameters...)
     return qct
 end

@@ -3,6 +3,7 @@ using LinearAlgebra: I, inv, tr
 using QuantumClusterTheories
 using QuantumLattices
 using TightBindingApproximation
+using TimerOutputs: TimerOutput
 import CairoMakie as Makie
 import Plots
 
@@ -65,7 +66,8 @@ end
     U = Hubbard(:U, 8.0)
     μ = Onsite(:μ, -U.value/2)
     quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
-    cpt = Algorithm(:SquareHubbard, CPT(unitcell, lattice, hilbert, (t, μ, U), quantumnumber))
+    timer = TimerOutput()
+    cpt = Algorithm(:SquareHubbard, CPT(unitcell, lattice, hilbert, (t, μ, U), quantumnumber; timer); timer)
 
     es = LinRange(-10.0, 10.0, 501)
     path = ReciprocalPath(reciprocals(unitcell), rectangle"Γ-X-M-Γ"; length=100)
@@ -94,11 +96,13 @@ end
     U = Hubbard(:U, parammap(parameters).U)
 
     quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
+    timer = TimerOutput()
     haldane = Algorithm(
         :HaldaneHubbard,
-        CPT(unitcell, lattice, hilbert, deepcopy((t, t′, μ, U)), quantumnumber, BandLanczosMethod(keepvecs=true)),
+        CPT(unitcell, lattice, hilbert, deepcopy((t, t′, μ, U)), quantumnumber, BandLanczosMethod(keepvecs=true); timer),
         parameters,
-        parammap
+        parammap;
+        timer
     )
 
     es = LinRange(-4.0, 4.0, 201)
@@ -122,9 +126,10 @@ end
     hilbert_edge = Hilbert(Fock{:f}(1, 2), length(edge))
     haldane_edge = Algorithm(
         :HaldaneHubbardEdge,
-        CPT(edge, edge, hilbert_edge, deepcopy((t, t′, μ, U)), ntuple(i->(6(i-1)+1, 6(i-1)+2, 6(i-1)+3, 6(i-1)+4, 6(i-1)+5, 6(i-1)+6), num)=>quantumnumber, BandLanczosMethod(keepvecs=true)),
+        CPT(edge, edge, hilbert_edge, deepcopy((t, t′, μ, U)), ntuple(i->(6(i-1)+1, 6(i-1)+2, 6(i-1)+3, 6(i-1)+4, 6(i-1)+5, 6(i-1)+6), num)=>quantumnumber, BandLanczosMethod(keepvecs=true); timer),
         parameters,
-        parammap
+        parammap;
+        timer
     );
     path_edge = ReciprocalPath(reciprocals(edge), -0.5=>0.5; length=100)
     spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04)
