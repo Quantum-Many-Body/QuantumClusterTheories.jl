@@ -59,7 +59,7 @@ haldane = Algorithm(
     :HaldaneHubbard,
     CPT(
         unitcell, lattice, hilbert,
-        deepcopy((t, t′, μ, U)),
+        (t, t′, μ, U),
         quantumnumber,
         BandLanczosMethod(keepvecs=true)
     ),
@@ -88,7 +88,7 @@ haldane_edge = Algorithm(
     :HaldaneHubbardEdge,
     CPT(
         edge, edge, hilbert_edge,
-        deepcopy((t, t′, μ, U)),
+        (t, t′, μ, U),
         ntuple(i->(6(i-1)+1, 6(i-1)+2, 6(i-1)+3, 6(i-1)+4, 6(i-1)+5, 6(i-1)+6), num)=>quantumnumber,
         BandLanczosMethod(keepvecs=true)
     ),
@@ -110,12 +110,14 @@ In the topological phase, the system has a finite bulk gap and hosts **gapless c
 **Bulk spectrum:**
 ```@example haldane-hubbard-cpt
 using Logging; Logging.disable_logging(Logging.Info)  # hide
+update!(haldane; U=4.0)
 spectra_topological = haldane(:EB, DynamicalSpectra(path, es); η=0.04);
 plot(spectra_topological, title="Bulk (U=4.0, Topological)")
 ```
 
 **Edge spectrum:**
 ```@example haldane-hubbard-cpt
+update!(haldane_edge; U=4.0)
 spectra_edge_topological = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04);
 plot(spectra_edge_topological, title="Edge (U=4.0, Gapless Edge States)")
 ```

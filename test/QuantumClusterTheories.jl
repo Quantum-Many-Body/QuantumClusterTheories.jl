@@ -99,7 +99,7 @@ end
     timer = TimerOutput()
     haldane = Algorithm(
         :HaldaneHubbard,
-        CPT(unitcell, lattice, hilbert, deepcopy((t, t′, μ, U)), quantumnumber, BandLanczosMethod(keepvecs=true); timer),
+        CPT(unitcell, lattice, hilbert, (t, t′, μ, U), quantumnumber, BandLanczosMethod(keepvecs=true); timer),
         parameters,
         parammap;
         timer
@@ -107,6 +107,7 @@ end
 
     es = LinRange(-4.0, 4.0, 201)
     path = ReciprocalPath(reciprocals(unitcell), hexagon"Γ-K-M-Γ"; length=100)
+    update!(haldane; U=4.0)
     spectra = haldane(:EB, DynamicalSpectra(path, es); η=0.04)
     Plots.savefig(Plots.plot(spectra), "Plots-Haldane-Hubbard-Topological.png")
     Makie.save("Makie-Haldane-Hubbard-Topological.png", Makie.plot(spectra))
@@ -126,12 +127,13 @@ end
     hilbert_edge = Hilbert(Fock{:f}(1, 2), length(edge))
     haldane_edge = Algorithm(
         :HaldaneHubbardEdge,
-        CPT(edge, edge, hilbert_edge, deepcopy((t, t′, μ, U)), ntuple(i->(6(i-1)+1, 6(i-1)+2, 6(i-1)+3, 6(i-1)+4, 6(i-1)+5, 6(i-1)+6), num)=>quantumnumber, BandLanczosMethod(keepvecs=true); timer),
+        CPT(edge, edge, hilbert_edge, (t, t′, μ, U), ntuple(i->(6(i-1)+1, 6(i-1)+2, 6(i-1)+3, 6(i-1)+4, 6(i-1)+5, 6(i-1)+6), num)=>quantumnumber, BandLanczosMethod(keepvecs=true); timer),
         parameters,
         parammap;
         timer
     );
     path_edge = ReciprocalPath(reciprocals(edge), -0.5=>0.5; length=100)
+    update!(haldane_edge; U=4.0)
     spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04)
     Plots.savefig(Plots.plot(spectra_edge), "Plots-Haldane-Hubbard-Edge-Topological.png")
     Makie.save("Makie-Haldane-Hubbard-Edge-Topological.png", Makie.plot(spectra_edge))

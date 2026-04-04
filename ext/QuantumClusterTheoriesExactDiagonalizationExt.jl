@@ -23,24 +23,27 @@ end
 
 Exact diagonalization based impurity solver computing the retarded Green's function with caching.
 """
-mutable struct EDSolver{E<:ED, G<:RetardedGreenFunction, O<:QuantumOperator, M<:GreenFunctionMethod} <: ImpuritySolver
+mutable struct EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:RetardedGreenFunction} <: ImpuritySolver
     const ed::E
-    gf::G
     const operators::Vector{O}
     const method::M
-    const cache::Cache
     const timer::TimerOutput
-end
-@inline function EDSolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod; timer::TimerOutput=qcttimer)
-    gf = RetardedGreenFunction(operators, ed, method; timer)
-    return EDSolver(ed, gf, operators, method, Cache(0im, gf(0im)), timer)
+    gf::G
+    cache::Cache
+    function EDSolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod; timer::TimerOutput=qcttimer)
+        G = Core.Compiler.return_type(RetardedGreenFunction, Tuple{typeof(operators), typeof(ed), typeof(method)})
+        return new{typeof(ed), eltype(operators), typeof(method), G}(ed, operators, method, timer)
+    end
 end
 @inline Parameters(solver::EDSolver) = Parameters(solver.ed)
+function set!(solver::EDSolver; ω::Number=0im)
+    solver.gf = RetardedGreenFunction(solver.operators, solver.ed, solver.method; timer=solver.timer)
+    solver.cache = Cache(ω, solver.gf(ω))
+    return solver
+end
 @inline function update!(solver::EDSolver; parameters...)
     update!(solver.ed; parameters...)
-    solver.gf = RetardedGreenFunction(solver.operators, solver.ed, solver.method; timer=solver.timer)
-    solver.cache.ω = 0im
-    solver.cache.data .= solver.gf(0im)
+    set!(solver)
     return solver
 end
 
@@ -50,12 +53,13 @@ end
 Evaluate the retarded Green's function at frequency `ω` using cached results when available.
 """
 @inline function (solver::EDSolver)(ω::Number)
-    if ω≈solver.cache.ω
-        return solver.cache.data
-    else
+    if !isdefined(solver, :gf)
+        set!(solver; ω=ω)
+    elseif !(ω≈solver.cache.ω)
         solver.cache.ω = ω
-        return solver.gf(fill!(solver.cache.data, 0), ω)
+        solver.gf(fill!(solver.cache.data, 0), ω)
     end
+    return solver.cache.data
 end
 
 """
@@ -103,36 +107,40 @@ end
 
 Composed exact diagonalization solver for partitioned clusters, computing block-diagonal retarded Green's function with caching.
 """
-struct ComposedEDSolver{E<:EDSolver} <: ImpuritySolver
-    blocks::Vector{Int}
-    representatives::Vector{E}
-    permutation::Vector{Int}
+mutable struct ComposedEDSolver{E<:EDSolver} <: ImpuritySolver
+    const blocks::Vector{Int}
+    const representatives::Vector{E}
+    const permutation::Vector{Int}
     cache::Cache
+    function ComposedEDSolver(blocks::AbstractVector{Int}, representatives::AbstractVector{<:EDSolver}, permutation::AbstractVector{Int})
+        return new{eltype(representatives)}(blocks, representatives, permutation)
+    end
 end
-function ComposedEDSolver(blocks::AbstractVector{Int}, representatives::AbstractVector{<:EDSolver}, permutation::AbstractVector{Int})
-    ms = [representatives[block](0im) for block in blocks]
-    result = blockdiag!(zeros(ComplexF64, mapreduce(size, .+, ms)), blocks, block::Int->ms[block], permutation)
-    return ComposedEDSolver(blocks, representatives, permutation, Cache(0im, result))
-end
-function blockdiag!(dest::Matrix{ComplexF64}, blocks::Vector{Int}, matrix::Function, permutation::AbstractVector{Int})
+function set!(solver::ComposedEDSolver; ω::Number=0im)
+    ms = [solver.representatives[block](ω) for block in solver.blocks]
+    if isdefined(solver, :cache)
+        fill!(solver.cache.data, 0)
+    else
+        solver.cache = Cache(ω, zeros(ComplexF64, mapreduce(size, .+, ms)))
+    end
+    solver.cache.ω = ω
     row, col = 1, 1
-    for block in blocks
-        m = matrix(block)
+    for block in solver.blocks
+        m = ms[block]
         inc_row, inc_col = size(m)
-        dest[row:row+inc_row-1, col:col+inc_col-1] = m
+        solver.cache.data[row:row+inc_row-1, col:col+inc_col-1] = m
         row += inc_row
         col += inc_col
     end
-    dest[:] = @view dest[permutation, permutation]
-    return dest
+    solver.cache.data[:] = @view solver.cache.data[solver.permutation, solver.permutation]
+    return solver
 end
 @inline Parameters(solver::ComposedEDSolver) = Parameters(first(solver.representatives))
 @inline function update!(solver::ComposedEDSolver; parameters...)
     for rep in solver.representatives
         update!(rep; parameters...)
     end
-    solver.cache.ω = 0im
-    solver.cache.data .= solver(0im)
+    set!(solver)
     return solver
 end
 
@@ -142,12 +150,8 @@ end
 Evaluate the block-diagonal retarded Green's function at frequency `ω` using cached results when available.
 """
 @inline function (solver::ComposedEDSolver)(ω::Number)
-    if ω≈solver.cache.ω
-        return solver.cache.data
-    else
-        solver.cache.ω = ω
-        return blockdiag!(fill!(solver.cache.data, 0), solver.blocks, block::Int->solver.representatives[block](ω), solver.permutation)
-    end
+    (isdefined(solver, :cache) && ω≈solver.cache.ω) || set!(solver; ω=ω)
+    return solver.cache.data
 end
 
 """
