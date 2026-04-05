@@ -1,6 +1,7 @@
 module QuantumClusterTheoriesExactDiagonalizationExt
 
 using ExactDiagonalization: Abelian, BandLanczosMethod, ED, EDKind, EDMatrixization, GreenFunctionMethod, RetardedGreenFunction, Sector
+using LinearAlgebra: eigen
 using QuantumLattices: AbstractLattice, Generator, Hilbert, Lattice, Metric, Neighbors, OneAtLeast, OneOrMore, QuantumOperator, Table, Term, bonds, isintracell, kind, nneighbor, atol, eager, plain, rtol
 using QuantumClusterTheories: Periodization, Perturbation, QCT, operators, qcttimer, quadratic
 using TightBindingApproximation: TBAKind
@@ -28,6 +29,7 @@ mutable struct EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:Re
     const operators::Vector{O}
     const method::M
     const timer::TimerOutput
+    Ω::Float64
     gf::G
     cache::Cache
     function EDSolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod; timer::TimerOutput=qcttimer)
@@ -37,13 +39,17 @@ mutable struct EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:Re
 end
 @inline Parameters(solver::EDSolver) = Parameters(solver.ed)
 function set!(solver::EDSolver; ω::Number=0im)
-    solver.gf = RetardedGreenFunction(solver.operators, solver.ed, solver.method; timer=solver.timer)
+    eigensystem = eigen(solver.ed; nev=1, timer=solver.timer)
+    solver.Ω, v₀, sector₀ = only(eigensystem.values), only(eigensystem.vectors), only(eigensystem.sectors)
+    solver.gf = RetardedGreenFunction(solver.operators, solver.ed, solver.method; e₀=solver.Ω, v₀=v₀, sector₀=sector₀, timer=solver.timer)
     solver.cache = Cache(ω, solver.gf(ω))
     return solver
 end
 @inline function update!(solver::EDSolver; parameters...)
-    update!(solver.ed; parameters...)
-    set!(solver)
+    if length(parameters) > 0
+        update!(solver.ed; parameters...)
+        set!(solver)
+    end
     return solver
 end
 
@@ -135,12 +141,14 @@ function set!(solver::ComposedEDSolver; ω::Number=0im)
     solver.cache.data[:] = @view solver.cache.data[solver.permutation, solver.permutation]
     return solver
 end
-@inline Parameters(solver::ComposedEDSolver) = Parameters(first(solver.representatives))
+@inline Parameters(solver::ComposedEDSolver) = mapreduce(Parameters, merge, solver.representatives)
 @inline function update!(solver::ComposedEDSolver; parameters...)
-    for rep in solver.representatives
-        update!(rep; parameters...)
+    if length(parameters) > 0
+        for rep in solver.representatives
+            update!(rep; parameters...)
+        end
+        set!(solver)
     end
-    set!(solver)
     return solver
 end
 
