@@ -1,14 +1,15 @@
 module QuantumClusterTheories
 
-using LinearAlgebra: I, dot, inv, tr
+using LinearAlgebra: I, det, dot, tr
 using TimerOutputs: TimerOutput
-using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
-using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, rtol
+using QuadGK: quadgk
+using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, BrillouinZone, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
+using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, reciprocals, rtol
 using StaticArrays: SVector
 using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
 import QuantumLattices: Parameters, kind, options, run!, update!
 
-export CPT, CPTPerturbation, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, Perturbation, QCT, operators, quadratic, qcttimer
+export CPT, CPTPerturbation, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, Perturbation, QCT, operators, quadratic, qcttimer, Ω
 
 """
     const qcttimer
@@ -121,19 +122,25 @@ end
 Apply crystallographic periodization to data at a given crystal momentum `k`.
 """
 function (periodization::Periodization)(data::AbstractMatrix{<:Number}, k::AbstractVector{<:Number})
-    N = length(periodization.groups)
-    L = length(periodization.coordinates) ÷ N
-    result = zeros(ComplexF64, N, N)
+    result = zeros(ComplexF64, length(periodization.groups), length(periodization.groups))
     for (i, groupᵢ) in enumerate(periodization.groups), (j, groupⱼ) in enumerate(periodization.groups)
         for m in groupᵢ, n in groupⱼ
             result[i, j] += data[m, n] * exp(1im*dot(k, periodization.coordinates[n]-periodization.coordinates[m]))
         end
     end
+    L = count(periodization)
     for index in eachindex(result)
         result[index] /= L
     end
     return result
 end
+
+"""
+    Base.count(periodization::Periodization) -> Int
+
+Return the number of unit cells in the cluster (i.e., the ratio of cluster size to unitcell size).
+"""
+@inline Base.count(periodization::Periodization) = length(periodization.coordinates)÷length(periodization.groups)
 
 """
     QCT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:Perturbation, P<:Periodization} <: Frontend
@@ -165,6 +172,31 @@ function (qct::QCT)(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=noth
     G, V = qct.solver(ω), qct.perturbation(k)
     result = G / (I-V*G)
     !isnothing(k) && periodization && (result = qct.periodization(result, k))
+    return result
+end
+
+"""
+    Ω(qct::QCT, brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100); μ::Real=0.0, atol::Real=10^-6, rtol::Real=10^-6, maxevals::Int=10^6) -> Float64
+    Ω(qct::Algorithm{<:QCT}, brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.frontend.lattice), 100); μ::Real=0.0, atol::Real=10^-6, rtol::Real=10^-6, maxevals::Int=10^6) -> Float64
+
+Compute the grand potential per unit cell of the quantum cluster theory system.
+"""
+@inline function Ω(qct::Algorithm{<:QCT}, brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.frontend.lattice), 100); μ::Real=0.0, atol::Real=10^-6, rtol::Real=10^-6, maxevals::Int=10^6)
+    return Ω(qct.frontend, brillouinzone; μ, atol, rtol, maxevals)
+end
+function Ω(qct::QCT, brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100); μ::Real=0.0, atol::Real=10^-6, rtol::Real=10^-6, maxevals::Int=10^6)
+    Vs = [qct.perturbation(k) for k in brillouinzone]
+    function f(ω)
+        result = 0.0
+        G = qct.solver(1im*ω+μ)
+        for V in Vs
+            result -= log(abs(det(I-V*G)))
+        end
+        return result
+    end
+    part₁ = quadgk(f, 0, Inf; atol, rtol, maxevals)[1]/π
+    part₂ = real(mapreduce(tr, +, Vs))/2
+    result = (Ω(qct.solver) + (part₁+part₂)/length(brillouinzone)) / count(qct.periodization)
     return result
 end
 

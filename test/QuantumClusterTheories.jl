@@ -43,6 +43,7 @@ import Plots
     periodization = Periodization(opsₗ, opsᵤ, unitcell.vectors)
     @test periodization.coordinates == reduce(vcat, [[lattice[i], lattice[i]] for i in eachindex(lattice)])
     @test periodization.groups == [[1, 3, 5, 7], [2, 4, 6, 8]]
+    @test count(periodization) == 4
 
     tba = TBA(Lattice(unitcell, (2, 2), ('O', 'O')), hilbert, first(terms))
     m = matrix(tba)
@@ -56,6 +57,7 @@ import Plots
 
     cpt = CPT(unitcell, lattice, hilbert, terms, quantumnumber)
     @test cpt(ω, k) ≈ inv(ω*I-[2cos(k[1])+2cos(k[2]) 0; 0 2cos(k[1])+2cos(k[2])])
+    @test Ω(cpt) ≈ -1.621072213728453
 end
 
 @testset "Square-Hubbard-Spectral" begin
@@ -68,6 +70,7 @@ end
     quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
     timer = TimerOutput()
     cpt = Algorithm(:SquareHubbard, CPT(unitcell, lattice, hilbert, (t, μ, U), quantumnumber; timer); timer)
+    @test Ω(cpt) ≈ -4.4444120382788945
 
     es = LinRange(-10.0, 10.0, 501)
     path = ReciprocalPath(reciprocals(unitcell), rectangle"Γ-X-M-Γ"; length=100)
@@ -134,6 +137,8 @@ end
     );
     path_edge = ReciprocalPath(reciprocals(edge), -0.5=>0.5; length=100)
     update!(haldane_edge; U=4.0)
+    @test Parameters(haldane_edge.frontend.solver) == (t=Complex(-1.0), t′=Complex(-0.2), μ=-2.0, U=4.0)
+    @test Ω(haldane_edge.frontend.solver) ≈ -125.35399159356793
     spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04)
     Plots.savefig(Plots.plot(spectra_edge), "Plots-Haldane-Hubbard-Edge-Topological.png")
     Makie.save("Makie-Haldane-Hubbard-Edge-Topological.png", Makie.plot(spectra_edge))

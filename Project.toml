@@ -5,6 +5,7 @@ authors = ["waltergu <waltergu1989@gmail.com> and contributors"]
 
 [deps]
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 QuantumLattices = "78ae1a1f-1d5d-5174-b61c-66e31b2346dc"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 TightBindingApproximation = "d3576f78-cb9d-4774-9dc5-b247cf392ff4"
@@ -19,6 +20,7 @@ QuantumClusterTheoriesExactDiagonalizationExt = ["ExactDiagonalization"]
 [compat]
 ExactDiagonalization = "0.3.2"
 LinearAlgebra = "1.10 - 1"
+QuadGK = "2.11 - 2"
 QuantumLattices = "0.14.6"
 StaticArrays = "1.4 - 1"
 TightBindingApproximation = "0.3.7"

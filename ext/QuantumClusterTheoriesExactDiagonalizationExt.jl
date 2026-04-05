@@ -6,7 +6,7 @@ using QuantumLattices: AbstractLattice, Generator, Hilbert, Lattice, Metric, Nei
 using QuantumClusterTheories: Periodization, Perturbation, QCT, operators, qcttimer, quadratic
 using TightBindingApproximation: TBAKind
 using TimerOutputs: TimerOutput
-import QuantumClusterTheories: CPT, ImpuritySolver
+import QuantumClusterTheories: CPT, ImpuritySolver, Ω
 import QuantumLattices: Parameters, update!
 
 """
@@ -67,6 +67,13 @@ Evaluate the retarded Green's function at frequency `ω` using cached results wh
     end
     return solver.cache.data
 end
+
+"""
+    Ω(solver::EDSolver) -> Float64
+
+Return the grand potential of the exact diagonalization solver.
+"""
+@inline Ω(solver::EDSolver) = solver.Ω
 
 """
     ImpuritySolver(
@@ -160,6 +167,19 @@ Evaluate the block-diagonal retarded Green's function at frequency `ω` using ca
 @inline function (solver::ComposedEDSolver)(ω::Number)
     (isdefined(solver, :cache) && ω≈solver.cache.ω) || set!(solver; ω=ω)
     return solver.cache.data
+end
+
+"""
+    Ω(solver::ComposedEDSolver) -> Float64
+
+Return the grand potential of the composed exact diagonalization solver.
+"""
+function Ω(solver::ComposedEDSolver)
+    result = 0.0
+    for block in solver.blocks
+        result += solver.representatives[block].Ω
+    end
+    return result
 end
 
 """
