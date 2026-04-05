@@ -136,7 +136,7 @@ function (periodization::Periodization)(data::AbstractMatrix{<:Number}, k::Abstr
 end
 
 """
-    Base.count(periodization::Periodization) -> Int
+    count(periodization::Periodization) -> Int
 
 Return the number of unit cells in the cluster (i.e., the ratio of cluster size to unitcell size).
 """
