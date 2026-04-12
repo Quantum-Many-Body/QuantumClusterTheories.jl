@@ -9,7 +9,7 @@ using StaticArrays: SVector
 using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
 import QuantumLattices: Parameters, kind, options, run!, update!
 
-export CPT, CPTPerturbation, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, Perturbation, QCT, operators, quadratic, qcttimer, Ω
+export CPT, CPTPerturbation, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, Perturbation, QCT, VCA, VCAPerturbation, operators, quadratic, qcttimer, Ω
 
 """
     const qcttimer
@@ -86,6 +86,52 @@ function Perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::On
     quadraticization = Quadraticization{typeof(kind)}(Table(hilbert, Metric(kind, hilbert)))
     commt = commutator(kind, hilbert)
     return CPTPerturbation(TBA{typeof(kind)}(H, quadraticization, commt))
+end
+
+"""
+    VCAPerturbation{V<:TBA, W<:TBA} <: Perturbation
+
+VCA (Variational Cluster Approach) perturbation containing both intercluster quadratic terms and Weiss field terms of a system.
+"""
+struct VCAPerturbation{V<:TBA, W<:TBA} <: Perturbation
+    intercluster::V
+    weiss::W
+end
+@inline kind(::Type{<:VCAPerturbation{V}}) where {V<:TBA} = kind(V)
+@inline function update!(perturbation::VCAPerturbation; parameters...)
+    update!(perturbation.intercluster; parameters...)
+    update!(perturbation.weiss; parameters...)
+    return perturbation
+end
+@inline function (perturbation::VCAPerturbation)(k::Union{AbstractVector{<:Number}, Nothing}=nothing)
+    return matrix(perturbation.intercluster, k) - matrix(perturbation.weiss, k)
+end
+
+"""
+    Perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss))) -> VCAPerturbation
+
+Construct a VCA perturbation from lattice, hilbert space, terms, and Weiss field terms.
+"""
+@inline function Perturbation(
+    lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term};
+    neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss))
+)
+    bonds₀ = bonds(lattice, neighbors)
+    bonds₁, bonds₂ = eltype(bonds₀)[], eltype(bonds₀)[]
+    for bond in bonds₀
+        isintracell(bond) ? push!(bonds₂, bond) : push!(bonds₁, bond)
+    end
+    return Perturbation(bonds₁, bonds₂, hilbert, terms, weiss)
+end
+function Perturbation(bonds₁::AbstractVector{<:Bond}, bonds₂::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term})
+    terms = quadratic(OneOrMore(terms))
+    weiss = quadratic(OneOrMore(weiss))
+    kind = TBAKind(typeof((terms..., weiss...)), valtype(hilbert))
+    H = Generator(bonds₁, hilbert, terms, plain, lazy; half=false)
+    W = Generator(bonds₂, hilbert, weiss, plain, lazy; half=false)
+    quadraticization = Quadraticization{typeof(kind)}(Table(hilbert, Metric(kind, hilbert)))
+    commt = commutator(kind, hilbert)
+    return VCAPerturbation(TBA{typeof(kind)}(H, quadraticization, commt), TBA{typeof(kind)}(W, quadraticization, commt))
 end
 
 """
@@ -206,6 +252,13 @@ end
 Alias for [`QCT`](@ref) with `V<:CPTPerturbation`, representing cluster perturbation theory.
 """
 const CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:CPTPerturbation, P<:Periodization} = QCT{U, L, I, V, P}
+
+"""
+    VCA{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:VCAPerturbation, P<:Periodization}
+
+Alias for [`QCT`](@ref) with `V<:VCAPerturbation`, representing the Variational Cluster Approach (VCA).
+"""
+const VCA{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:VCAPerturbation, P<:Periodization} = QCT{U, L, I, V, P}
 
 """
     DynamicalSpectra{R<:ReciprocalSpace} <: Action

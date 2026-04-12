@@ -2,11 +2,11 @@ module QuantumClusterTheoriesExactDiagonalizationExt
 
 using ExactDiagonalization: Abelian, BandLanczosMethod, ED, EDKind, EDMatrixization, GreenFunctionMethod, RetardedGreenFunction, Sector
 using LinearAlgebra: eigen
-using QuantumLattices: AbstractLattice, Generator, Hilbert, Lattice, Metric, Neighbors, OneAtLeast, OneOrMore, QuantumOperator, Table, Term, bonds, isintracell, kind, nneighbor, atol, eager, plain, rtol
+using QuantumLattices: AbstractLattice, Generator, Hilbert, Lattice, Metric, Neighbors, OneAtLeast, OneOrMore, QuantumOperator, Table, Term, bonds, isintracell, kind, nneighbor, eager, plain
 using QuantumClusterTheories: Periodization, Perturbation, QCT, operators, qcttimer, quadratic
 using TightBindingApproximation: TBAKind
 using TimerOutputs: TimerOutput
-import QuantumClusterTheories: CPT, ImpuritySolver, Ω
+import QuantumClusterTheories: CPT, ImpuritySolver, VCA, Ω
 import QuantumLattices: Parameters, update!
 
 """
@@ -98,16 +98,42 @@ function ImpuritySolver(
 end
 
 """
-    CPT(unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms); neighbors::Union{Int, Neighbors}=nneighbor(terms), atol=atol, rtol=rtol, timer::TimerOutput=qcttimer) -> CPT
+    CPT(
+        unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
+        neighbors::Union{Int, Neighbors}=nneighbor(terms), timer::TimerOutput=qcttimer
+    ) -> CPT
 
 Construct a cluster perturbation theory (CPT) frontend using exact diagonalization as the impurity solver.
 """
 function CPT(
     unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
-    neighbors::Union{Int, Neighbors}=nneighbor(terms), atol=atol, rtol=rtol, timer::TimerOutput=qcttimer
+    neighbors::Union{Int, Neighbors}=nneighbor(terms), timer::TimerOutput=qcttimer
 )
     solver = ImpuritySolver(lattice, hilbert, terms, quantumnumbers, method, dtype; neighbors, timer)
     pert = Perturbation(lattice, hilbert, terms; neighbors)
+    tbakind = kind(pert)
+    opsₗ = operators(tbakind, lattice, hilbert)
+    opsᵤ = operators(tbakind, unitcell, hilbert)
+    periodization = Periodization(opsₗ, opsᵤ, unitcell.vectors)
+    return QCT(unitcell, lattice, solver, pert, periodization)
+end
+
+"""
+    VCA(
+        unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
+        method=BandLanczosMethod(), dtype::Type{<:Number}=promote_type(valtype(terms), valtype(weiss));
+        neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss)), timer::TimerOutput=qcttimer
+    ) -> VCA
+
+Construct a Variational Cluster Approach (VCA) frontend using exact diagonalization as the impurity solver.
+"""
+function VCA(
+    unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
+    method=BandLanczosMethod(), dtype::Type{<:Number}=promote_type(valtype(terms), valtype(weiss));
+    neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss)), timer::TimerOutput=qcttimer
+)
+    solver = ImpuritySolver(lattice, hilbert, (OneOrMore(terms)..., OneOrMore(weiss)...), quantumnumbers, method, dtype; neighbors, timer)
+    pert = Perturbation(lattice, hilbert, terms, weiss; neighbors)
     tbakind = kind(pert)
     opsₗ = operators(tbakind, lattice, hilbert)
     opsᵤ = operators(tbakind, unitcell, hilbert)

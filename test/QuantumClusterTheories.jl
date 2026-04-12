@@ -1,5 +1,5 @@
 using ExactDiagonalization
-using LinearAlgebra: I, inv, tr
+using LinearAlgebra: I, dot, inv, tr
 using QuantumClusterTheories
 using QuantumLattices
 using TightBindingApproximation
@@ -147,4 +147,26 @@ end
     spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04)
     Plots.savefig(Plots.plot(spectra_edge), "Plots-Haldane-Hubbard-Edge-Trivial.png")
     Makie.save("Makie-Haldane-Hubbard-Edge-Trivial.png", Makie.plot(spectra_edge))
+end
+
+@testset "Square-Hubbard-AFM" begin
+    unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
+    lattice = Lattice(unitcell, (2, 2), ('P', 'P'))
+    hilbert = Hilbert(site=>Fock{:f}(1, 2) for site in eachindex(lattice))
+    t = Hopping(:t, -1.0, 1)
+    U = Hubbard(:U, 8.0)
+    m = Onsite(:m, 0.0, 𝕔⁺𝕔(:, :, σᶻ); amplitude=bond::Bond -> real(exp(1im*dot((π, π), rcoordinate(bond)))))
+    μ = Onsite(:μ, -U.value/2)
+    quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
+    timer = TimerOutput()
+    vca = Algorithm(:SquareHubbard, VCA(unitcell, lattice, hilbert, (t, μ, U), m, quantumnumber, BandLanczosMethod(keepvecs=true); timer); timer)
+
+    vs = LinRange(0.0, 0.3, 31)
+    result = zeros(length(vs))
+    for (i, v) in enumerate(vs)
+        update!(vca; m=v)
+        result[i] = Ω(vca)
+    end
+    Plots.savefig(Plots.plot(vs, result), "Plots-Square-Hubbard-AFM.png")
+    Makie.save("Makie-Square-Hubbard-AFM.png", Makie.lines(vs, result))
 end
