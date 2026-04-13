@@ -5,13 +5,13 @@ using TimerOutputs: TimerOutput
 using Optim: LBFGS, Options, optimize
 using QuadGK: quadgk
 using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, BrillouinZone, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
-using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, reciprocals, rtol
+using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubordinate, lazy, nneighbor, plain, rank, rcoordinate, reciprocals, rtol
 using StaticArrays: SVector
 using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
-import QuantumLattices: Parameters, kind, options, run!, update!
+import QuantumLattices: Parameters, kind, matrix, options, run!, update!
 import TightBindingApproximation.Fitting: optimize!
 
-export CPT, CPTPerturbation, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, Perturbation, QCT, VCA, VCAPerturbation, operators, optimize!, quadratic, qcttimer, Ω
+export CPT, CPTPerturbation, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, Perturbation, QCT, VCA, VCAPerturbation, expectation, matrix, operators, optimize!, quadratic, qcttimer, Ω
 
 """
     const qcttimer
@@ -232,23 +232,23 @@ When `k` is `nothing`, no periodization is performed even if `periodization=true
 @inline (qct::Algorithm{<:QCT})(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true) = (qct.frontend)(ω, k; periodization)
 function (qct::QCT)(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
     G, V = qct.solver(ω), qct.perturbation(k)
-    result = G / (I-V*G)
+    result = inv(inv(G) - V)
     !isnothing(k) && periodization && (result = qct.periodization(result, k))
     return result
 end
 
 """
+    Ω(qct::Algorithm{<:QCT}; kwargs...) -> Float64
     Ω(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6) -> Float64
-    Ω(qct::Algorithm{<:QCT}; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.frontend.lattice), 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6) -> Float64
 
 Compute the grand potential per unit cell of the quantum cluster theory system.
+
+For `Algorithm{<:VCA}`, this delegates to the second method.
 """
-@inline function Ω(qct::Algorithm{<:QCT}; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.frontend.lattice), 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6)
-    return Ω(qct.frontend; brillouinzone, μ, atol, rtol, maxevals)
-end
+@inline Ω(qct::Algorithm{<:QCT}; kwargs...) = Ω(qct.frontend; kwargs...)
 function Ω(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6)
     Vs = [qct.perturbation(k) for k in brillouinzone]
-    function f(ω)
+    function f(ω::Real)
         result = 0.0
         G = qct.solver(1im*ω+μ)
         for V in Vs
@@ -259,8 +259,38 @@ function Ω(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct
     part₁ = quadgk(f, 0, Inf; atol, rtol, maxevals)[1]/π
     part₂ = real(mapreduce(tr, +, Vs))/2
     result = (Ω(qct.solver) + (part₁+part₂)/length(brillouinzone)) / count(qct.periodization)
-    return result
+    return result::Float64
 end
+
+"""
+    expectation(qct::Algorithm{<:QCT}, m::Union{AbstractMatrix{<:Number}, Function}; kwargs...)
+    expectation(qct::QCT, m::Union{AbstractMatrix{<:Number}, Function}; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, p::Real=1.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6) -> Float64
+
+Compute the expectation value of an operator `m` (matrix or function of `k`) over the quantum cluster theory system by integrating over the Brillouin zone and frequency.
+
+For `Algorithm{<:QCT}`, this delegates to the second method.
+"""
+@inline expectation(qct::Algorithm{<:QCT}, m::Union{AbstractMatrix{<:Number}, Function}; kwargs...) = expectation(qct.frontend, m; kwargs...)
+function expectation(
+    qct::QCT, m::Union{AbstractMatrix{<:Number}, Function};
+    brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, p::Real=1.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
+)
+    Vs = [qct.perturbation(k) for k in brillouinzone]
+    Ss = [_matrix_(m, k) for k in brillouinzone]
+    Ts = [tr(S) for S in Ss]
+    function f(ω::Real)
+        result = 0.0
+        Gᵢₙᵥ = inv(qct.solver(1im*ω+μ))
+        for (V, S, T) in zip(Vs, Ss, Ts)
+            result += real(tr(S*inv(Gᵢₙᵥ-V)) - T/(1im*ω-p))
+        end
+        return (result/length(brillouinzone)/π)
+    end
+    result = quadgk(f, 0, Inf; atol, rtol, maxevals)[1]/length(qct.lattice)
+    return result::Float64
+end
+@inline _matrix_(m::AbstractMatrix{<:Number}, ::AbstractVector{<:Number}) = m
+@inline _matrix_(m::Function, k::AbstractVector{<:Number}) = m(k)::AbstractMatrix{<:Number}
 
 """
     optimize!(vca::Algorithm{<:VCA}; kwargs...)
@@ -292,6 +322,20 @@ function optimize!(
     parameters = Parameters{keys(params)}(op.minimizer...)
     update!(vca; parameters...)
     return vca, op
+end
+
+"""
+    matrix(vca::Algorithm{<:VCA}, symbol::Symbol)
+    matrix(vca::VCA, symbol::Symbol) -> AbstractMatrix
+
+Get the matrix representation of a term identified by `symbol` in the VCA Weiss field.
+For `Algorithm{<:VCA}`, this delegates to the second method.
+"""
+@inline matrix(vca::Algorithm{<:VCA}, symbol::Symbol) = matrix(vca.frontend, symbol)
+function matrix(vca::VCA, symbol::Symbol)
+    weiss = update!(deepcopy(vca.perturbation.weiss); symbol=>1)
+    selected = TBA{typeof(kind(weiss))}(expand(weiss.system, symbol), weiss.quadraticization, weiss.commutator)
+    return matrix(selected).H.data
 end
 
 """
