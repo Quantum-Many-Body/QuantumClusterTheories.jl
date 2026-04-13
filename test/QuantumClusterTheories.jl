@@ -155,11 +155,14 @@ end
     hilbert = Hilbert(site=>Fock{:f}(1, 2) for site in eachindex(lattice))
     t = Hopping(:t, -1.0, 1)
     U = Hubbard(:U, 8.0)
-    m = Onsite(:m, 0.0, 𝕔⁺𝕔(:, :, σᶻ); amplitude=bond::Bond -> real(exp(1im*dot((π, π), rcoordinate(bond)))))
+    m = Onsite(:m, 0.3, 𝕔⁺𝕔(:, :, σᶻ); amplitude=bond::Bond -> real(exp(1im*dot((π, π), rcoordinate(bond)))))
     μ = Onsite(:μ, -U.value/2)
     quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
     timer = TimerOutput()
     vca = Algorithm(:SquareHubbard, VCA(unitcell, lattice, hilbert, (t, μ, U), m, quantumnumber, BandLanczosMethod(keepvecs=true); timer); timer)
+    op = optimize!(vca)[2]
+    @test op.minimum ≈ -4.492911205682658
+    @test op.minimizer[1] ≈ 0.1955178114114018
 
     vs = LinRange(0.0, 0.3, 31)
     result = zeros(length(vs))

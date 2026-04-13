@@ -2,14 +2,16 @@ module QuantumClusterTheories
 
 using LinearAlgebra: I, det, dot, tr
 using TimerOutputs: TimerOutput
+using Optim: LBFGS, Options, optimize
 using QuadGK: quadgk
 using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, BrillouinZone, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
 using QuantumLattices: atol, bonds, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, reciprocals, rtol
 using StaticArrays: SVector
 using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
 import QuantumLattices: Parameters, kind, options, run!, update!
+import TightBindingApproximation.Fitting: optimize!
 
-export CPT, CPTPerturbation, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, Perturbation, QCT, VCA, VCAPerturbation, operators, quadratic, qcttimer, Ω
+export CPT, CPTPerturbation, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, Perturbation, QCT, VCA, VCAPerturbation, operators, optimize!, quadratic, qcttimer, Ω
 
 """
     const qcttimer
@@ -208,6 +210,20 @@ end
 end
 
 """
+    CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:CPTPerturbation, P<:Periodization}
+
+Alias for [`QCT`](@ref) with `V<:CPTPerturbation`, representing cluster perturbation theory.
+"""
+const CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:CPTPerturbation, P<:Periodization} = QCT{U, L, I, V, P}
+
+"""
+    VCA{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:VCAPerturbation, P<:Periodization}
+
+Alias for [`QCT`](@ref) with `V<:VCAPerturbation`, representing the Variational Cluster Approach (VCA).
+"""
+const VCA{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:VCAPerturbation, P<:Periodization} = QCT{U, L, I, V, P}
+
+"""
     (qct::Union{QCT, Algorithm{<:QCT}})(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
 
 Evaluate the Green's function at frequency `ω` and momentum `k` by use of quantum cluster theory.
@@ -222,15 +238,15 @@ function (qct::QCT)(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=noth
 end
 
 """
-    Ω(qct::QCT, brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100); μ::Real=0.0, atol::Real=10^-6, rtol::Real=10^-6, maxevals::Int=10^6) -> Float64
-    Ω(qct::Algorithm{<:QCT}, brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.frontend.lattice), 100); μ::Real=0.0, atol::Real=10^-6, rtol::Real=10^-6, maxevals::Int=10^6) -> Float64
+    Ω(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6) -> Float64
+    Ω(qct::Algorithm{<:QCT}; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.frontend.lattice), 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6) -> Float64
 
 Compute the grand potential per unit cell of the quantum cluster theory system.
 """
-@inline function Ω(qct::Algorithm{<:QCT}, brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.frontend.lattice), 100); μ::Real=0.0, atol::Real=10^-6, rtol::Real=10^-6, maxevals::Int=10^6)
-    return Ω(qct.frontend, brillouinzone; μ, atol, rtol, maxevals)
+@inline function Ω(qct::Algorithm{<:QCT}; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.frontend.lattice), 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6)
+    return Ω(qct.frontend; brillouinzone, μ, atol, rtol, maxevals)
 end
-function Ω(qct::QCT, brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100); μ::Real=0.0, atol::Real=10^-6, rtol::Real=10^-6, maxevals::Int=10^6)
+function Ω(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6)
     Vs = [qct.perturbation(k) for k in brillouinzone]
     function f(ω)
         result = 0.0
@@ -247,18 +263,36 @@ function Ω(qct::QCT, brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct
 end
 
 """
-    CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:CPTPerturbation, P<:Periodization}
+    optimize!(vca::Algorithm{<:VCA}; kwargs...)
+    optimize!(
+        vca::VCA;
+        verbose=false, method=LBFGS(), options=Options(x_abstol=1e-4, x_reltol=1e-3, f_abstol=5e-6, f_reltol=5e-6),
+        Ω_options=(brillouinzone=BrillouinZone(reciprocals(vca.lattice), 100), μ=0.0, atol=1e-6, rtol=1e-6, maxevals=10^6)
+    )
 
-Alias for [`QCT`](@ref) with `V<:CPTPerturbation`, representing cluster perturbation theory.
-"""
-const CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:CPTPerturbation, P<:Periodization} = QCT{U, L, I, V, P}
+Optimize the variational cluster approximation to find the stationary point of the grand potential.
 
+For `Algorithm{<:VCA}`, this delegates to the second method.
+For `VCA`, the parameters are optimized using the specified method.
 """
-    VCA{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:VCAPerturbation, P<:Periodization}
-
-Alias for [`QCT`](@ref) with `V<:VCAPerturbation`, representing the Variational Cluster Approach (VCA).
-"""
-const VCA{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:VCAPerturbation, P<:Periodization} = QCT{U, L, I, V, P}
+@inline optimize!(vca::Algorithm{<:VCA}; kwargs...) = optimize!(vca.frontend; kwargs...)
+function optimize!(
+    vca::VCA;
+    verbose=false, method=LBFGS(), options=Options(x_abstol=1e-4, x_reltol=1e-3, f_abstol=5e-6, f_reltol=5e-6),
+    Ω_options=(brillouinzone=BrillouinZone(reciprocals(vca.lattice), 100), μ=0.0, atol=1e-6, rtol=1e-6, maxevals=10^6)
+    )
+    params = Parameters(vca.perturbation.weiss)
+    function f(v::Vector{<:Number})
+        parameters = Parameters{keys(params)}(v...)
+        update!(vca; parameters...)
+        verbose && println(parameters)
+        return Ω(vca; Ω_options...)
+    end
+    op = optimize(f, collect(map(real, values(params))), method, options)
+    parameters = Parameters{keys(params)}(op.minimizer...)
+    update!(vca; parameters...)
+    return vca, op
+end
 
 """
     DynamicalSpectra{R<:ReciprocalSpace} <: Action
