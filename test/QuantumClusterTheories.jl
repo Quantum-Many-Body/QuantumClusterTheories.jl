@@ -54,6 +54,7 @@ import Plots
     solver = ImpuritySolver(lattice, hilbert, terms, quantumnumber)
     ω = rand(ComplexF64)
     @test inv(ω*I-m) ≈ solver(ω)
+    @test invoke(inv, Tuple{ImpuritySolver, Number}, solver, ω) ≈ inv(solver, ω)
 
     cpt = CPT(unitcell, lattice, hilbert, terms, quantumnumber)
     @test cpt(ω, k) ≈ inv(ω*I-[2cos(k[1])+2cos(k[2]) 0; 0 2cos(k[1])+2cos(k[2])])
@@ -135,10 +136,12 @@ end
         parammap;
         timer
     );
-    path_edge = ReciprocalPath(reciprocals(edge), -0.5=>0.5; length=100)
     update!(haldane_edge; U=4.0)
     @test Parameters(haldane_edge.frontend.solver) == (t=Complex(-1.0), t′=Complex(-0.2), μ=-2.0, U=4.0)
+    ω = rand(ComplexF64)
+    @test invoke(inv, Tuple{ImpuritySolver, Number}, haldane_edge.frontend.solver, ω) ≈ inv(haldane_edge.frontend.solver, ω)
     @test Ω(haldane_edge.frontend.solver) ≈ -125.35399159356793
+    path_edge = ReciprocalPath(reciprocals(edge), -0.5=>0.5; length=100)
     spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04)
     Plots.savefig(Plots.plot(spectra_edge), "Plots-Haldane-Hubbard-Edge-Topological.png")
     Makie.save("Makie-Haldane-Hubbard-Edge-Topological.png", Makie.plot(spectra_edge))
@@ -163,7 +166,7 @@ end
     op = optimize!(vca)[2]
     @test op.minimum ≈ -4.492911205682658
     @test op.minimizer[1] ≈ 0.1955178114114018
-    @test matrix(vca, :m) == [
+    M = [
        -1.0  0.0  0.0   0.0  0.0   0.0   0.0  0.0;
         0.0  1.0  0.0   0.0  0.0   0.0   0.0  0.0;
         0.0  0.0  1.0   0.0  0.0   0.0   0.0  0.0;
@@ -173,7 +176,7 @@ end
         0.0  0.0  0.0   0.0  0.0   0.0  -1.0  0.0;
         0.0  0.0  0.0   0.0  0.0   0.0   0.0  1.0
     ]
-    @test expectation(vca, matrix(vca, :m)) ≈ -0.8070466592810626
+    @test expectation(vca, :m) ≈ expectation(vca, M) ≈ -0.8070466592810626
 
     vs = LinRange(0.0, 0.3, 31)
     result = zeros(length(vs))

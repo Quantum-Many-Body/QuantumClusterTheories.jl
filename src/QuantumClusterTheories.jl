@@ -5,13 +5,13 @@ using TimerOutputs: TimerOutput
 using Optim: LBFGS, Options, optimize
 using QuadGK: quadgk
 using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, BrillouinZone, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
-using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubordinate, lazy, nneighbor, plain, rank, rcoordinate, reciprocals, rtol
+using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, reciprocals, rtol
 using StaticArrays: SVector
 using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
-import QuantumLattices: Parameters, kind, matrix, options, run!, update!
+import QuantumLattices: Parameters, kind, options, run!, update!
 import TightBindingApproximation.Fitting: optimize!
 
-export CPT, CPTPerturbation, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, Perturbation, QCT, VCA, VCAPerturbation, expectation, matrix, operators, optimize!, quadratic, qcttimer, Ω
+export CPT, CPTPerturbation, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, Perturbation, QCT, VCA, VCAPerturbation, expectation, operators, optimize!, quadratic, qcttimer, Ω
 
 """
     const qcttimer
@@ -117,7 +117,13 @@ end
 end
 
 """
-    Perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss))) -> VCAPerturbation
+    Perturbation(
+        lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term};
+        neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss))
+    ) -> VCAPerturbation
+    Perturbation(
+        bonds₁::AbstractVector{<:Bond}, bonds₂::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term}
+    ) -> VCAPerturbation
 
 Construct a VCA perturbation from lattice, hilbert space, terms, and Weiss field terms.
 """
@@ -153,8 +159,12 @@ struct Periodization{N}
     coordinates::Vector{SVector{N, Float64}}
     groups::Vector{Vector{Int}}
 end
+
 """
-    Periodization(ops_lattice, ops_unitcell, vectors; atol=atol, rtol=rtol) -> Periodization
+    Periodization(
+        ops_lattice::AbstractVector{<:CoordinatedIndex}, ops_unitcell::AbstractVector{<:CoordinatedIndex}, vectors::AbstractVector{<:AbstractVector{<:Number}};
+        atol=atol, rtol=rtol
+    ) -> Periodization
 
 Construct a `Periodization` object by grouping lattice operators into translation-equivalent sets.
 """
@@ -246,7 +256,10 @@ end
 
 """
     Ω(qct::Algorithm{<:QCT}; kwargs...) -> Float64
-    Ω(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6) -> Float64
+    Ω(
+        qct::QCT;
+        brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
+    ) -> Float64
 
 Compute the grand potential per unit cell of the quantum cluster theory system.
 
@@ -270,14 +283,23 @@ function Ω(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct
 end
 
 """
-    expectation(qct::Algorithm{<:QCT}, m::Union{AbstractMatrix{<:Number}, Function}; kwargs...)
-    expectation(qct::QCT, m::Union{AbstractMatrix{<:Number}, Function}; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, p::Real=1.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6) -> Float64
+    expectation(qct::Algorithm{<:QCT}, m::Union{AbstractMatrix{<:Number}, Function, Symbol}; kwargs...) -> Float64
+    expectation(
+        qct::QCT, m::Union{AbstractMatrix{<:Number}, Function, Symbol};
+        brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, p::Real=1.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
+    ) -> Float64
 
-Compute the expectation value of an operator `m` (matrix or function of `k`) over the quantum cluster theory system by integrating over the Brillouin zone and frequency.
+Compute the expectation value of an operator `m` (matrix, or function of `k`, or the symbol specifies the Weiss term in VCA) over the quantum cluster theory system by integrating over the Brillouin zone and frequency.
 
 For `Algorithm{<:QCT}`, this delegates to the second method.
 """
-@inline expectation(qct::Algorithm{<:QCT}, m::Union{AbstractMatrix{<:Number}, Function}; kwargs...) = expectation(qct.frontend, m; kwargs...)
+@inline expectation(qct::Algorithm{<:QCT}, m::Union{AbstractMatrix{<:Number}, Function, Symbol}; kwargs...) = expectation(qct.frontend, m; kwargs...)
+function expectation(qct::VCA, m::Symbol; kwargs...)
+    weiss = update!(deepcopy(qct.perturbation.weiss); m=>1)
+    selected = TBA{typeof(kind(weiss))}(expand(weiss.system, m), weiss.quadraticization, weiss.commutator)
+    f(k::AbstractVector{<:Number}) = matrix(selected, k).H.data
+    return expectation(qct, f; kwargs...)
+end
 function expectation(
     qct::QCT, m::Union{AbstractMatrix{<:Number}, Function};
     brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, p::Real=1.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
@@ -329,20 +351,6 @@ function optimize!(
     parameters = Parameters{keys(params)}(op.minimizer...)
     update!(vca; parameters...)
     return vca, op
-end
-
-"""
-    matrix(vca::Algorithm{<:VCA}, symbol::Symbol)
-    matrix(vca::VCA, symbol::Symbol) -> AbstractMatrix
-
-Get the matrix representation of a term identified by `symbol` in the VCA Weiss field.
-For `Algorithm{<:VCA}`, this delegates to the second method.
-"""
-@inline matrix(vca::Algorithm{<:VCA}, symbol::Symbol) = matrix(vca.frontend, symbol)
-function matrix(vca::VCA, symbol::Symbol)
-    weiss = update!(deepcopy(vca.perturbation.weiss); symbol=>1)
-    selected = TBA{typeof(kind(weiss))}(expand(weiss.system, symbol), weiss.quadraticization, weiss.commutator)
-    return matrix(selected).H.data
 end
 
 """
