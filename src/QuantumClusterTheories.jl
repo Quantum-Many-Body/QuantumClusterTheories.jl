@@ -274,11 +274,11 @@ function Ω(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct
         for V in Vs
             result -= log(abs(det(I-V*G)))
         end
-        return result
+        return result / length(brillouinzone) / π
     end
-    part₁ = quadgk(f, 0, Inf; atol, rtol, maxevals)[1]/π
-    part₂ = real(mapreduce(tr, +, Vs))/2
-    result = (Ω(qct.solver) + (part₁+part₂)/length(brillouinzone)) / count(qct.periodization)
+    part₁ = quadgk(f, 0, Inf; atol, rtol, maxevals)[1]
+    part₂ = real(mapreduce(tr, +, Vs)) / length(brillouinzone) / 2
+    result = (Ω(qct.solver) + part₁ + part₂) / count(qct.periodization)
     return result::Float64
 end
 
@@ -313,9 +313,9 @@ function expectation(
         for (V, S, T) in zip(Vs, Ss, Ts)
             result += real(tr(S*inv(G⁻¹-V)) - T/(1im*ω-p))
         end
-        return result/length(brillouinzone)/π
+        return result / length(brillouinzone) / π
     end
-    result = quadgk(f, 0, Inf; atol, rtol, maxevals)[1]/length(qct.lattice)
+    result = quadgk(f, 0, Inf; atol, rtol, maxevals)[1] / length(qct.lattice)
     return result::Float64
 end
 @inline _matrix_(m::AbstractMatrix{<:Number}, ::AbstractVector{<:Number}) = m
@@ -325,7 +325,7 @@ end
     optimize!(vca::Algorithm{<:VCA}; kwargs...)
     optimize!(
         vca::VCA;
-        verbose=false, method=LBFGS(), options=Options(x_abstol=1e-4, x_reltol=1e-3, f_abstol=5e-6, f_reltol=5e-6),
+        verbose=false, method=LBFGS(), options=Options(x_abstol=1e-4, x_reltol=1e-4, f_abstol=2e-6, f_reltol=2e-6),
         Ω_options=(brillouinzone=BrillouinZone(reciprocals(vca.lattice), 100), μ=0.0, atol=1e-6, rtol=1e-6, maxevals=10^6)
     )
 
@@ -337,7 +337,7 @@ For `VCA`, the parameters are optimized using the specified method.
 @inline optimize!(vca::Algorithm{<:VCA}; kwargs...) = optimize!(vca.frontend; kwargs...)
 function optimize!(
     vca::VCA;
-    verbose=false, method=LBFGS(), options=Options(x_abstol=1e-4, x_reltol=1e-3, f_abstol=5e-6, f_reltol=5e-6),
+    verbose=false, method=LBFGS(), options=Options(x_abstol=1e-4, x_reltol=1e-4, f_abstol=2e-6, f_reltol=2e-6),
     Ω_options=(brillouinzone=BrillouinZone(reciprocals(vca.lattice), 100), μ=0.0, atol=1e-6, rtol=1e-6, maxevals=10^6)
     )
     params = Parameters(vca.perturbation.weiss)
