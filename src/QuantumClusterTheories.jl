@@ -52,6 +52,9 @@ Subtypes must implement the call syntax `solver(ω)` to return the solver's resp
 abstract type ImpuritySolver end
 
 """
+    inv(solver::ImpuritySolver, ω::Number) -> Matrix{ComplexF64}
+
+Get the inverse of the retarded Green's function at frequency `ω`
 """
 @inline Base.inv(solver::ImpuritySolver, ω::Number) = inv(solver(ω))
 
@@ -235,8 +238,8 @@ When `k` is `nothing`, no periodization is performed even if `periodization=true
 """
 @inline (qct::Algorithm{<:QCT})(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true) = (qct.frontend)(ω, k; periodization)
 function (qct::QCT)(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=nothing; periodization::Bool=true)
-    Gᵢₙᵥ, V = inv(qct.solver, ω), qct.perturbation(k)
-    result = inv(Gᵢₙᵥ-V)
+    G⁻¹, V = inv(qct.solver, ω), qct.perturbation(k)
+    result = inv(G⁻¹-V)
     !isnothing(k) && periodization && (result = qct.periodization(result, k))
     return result
 end
@@ -284,9 +287,9 @@ function expectation(
     Ts = [tr(S) for S in Ss]
     function f(ω::Real)
         result = 0.0
-        Gᵢₙᵥ = inv(qct.solver, 1im*ω+μ)
+        G⁻¹ = inv(qct.solver, 1im*ω+μ)
         for (V, S, T) in zip(Vs, Ss, Ts)
-            result += real(tr(S*inv(Gᵢₙᵥ-V)) - T/(1im*ω-p))
+            result += real(tr(S*inv(G⁻¹-V)) - T/(1im*ω-p))
         end
         return result/length(brillouinzone)/π
     end
