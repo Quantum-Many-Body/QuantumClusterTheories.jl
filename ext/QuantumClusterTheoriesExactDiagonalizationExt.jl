@@ -196,6 +196,23 @@ Evaluate the block-diagonal retarded Green's function at frequency `ω` using ca
 end
 
 """
+"""
+function Base.inv(solver::ComposedEDSolver, ω::Number)
+    ms = [inv(solver.representatives[block], ω) for block in solver.blocks]
+    n = mapreduce(x -> size(x, 1), +, ms)
+    m = mapreduce(x -> size(x, 2), +, ms)
+    result = zeros(ComplexF64, n, m)
+    row, col = 1, 1
+    for (i, block) in enumerate(solver.blocks)
+        inc_row, inc_col = size(ms[i])
+        result[row:row+inc_row-1, col:col+inc_col-1] = ms[i]
+        row += inc_row
+        col += inc_col
+    end
+    return result[solver.permutation, solver.permutation]
+end
+
+"""
     Ω(solver::ComposedEDSolver) -> Float64
 
 Return the grand potential of the composed exact diagonalization solver.
