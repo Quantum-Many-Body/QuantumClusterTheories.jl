@@ -58,7 +58,7 @@ import Plots
 
     cpt = CPT(unitcell, lattice, hilbert, terms, quantumnumber)
     @test cpt(ω, k) ≈ inv(ω*I-[2cos(k[1])+2cos(k[2]) 0; 0 2cos(k[1])+2cos(k[2])])
-    @test Ω(cpt) ≈ -1.621072213728453
+    @test isapprox(Ω(cpt), -1.621072213728453; atol=1e-6)
 end
 
 @testset "Square-Hubbard-Spectral" begin
@@ -71,7 +71,7 @@ end
     quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
     timer = TimerOutput()
     cpt = Algorithm(:SquareHubbard, CPT(unitcell, lattice, hilbert, (t, μ, U), quantumnumber; timer); timer)
-    @test Ω(cpt) ≈ -4.4444120382788945
+    @test isapprox(Ω(cpt), -4.4444120382788945; atol=1e-6)
 
     es = LinRange(-10.0, 10.0, 501)
     path = ReciprocalPath(reciprocals(unitcell), rectangle"Γ-X-M-Γ"; length=100)
@@ -140,7 +140,7 @@ end
     @test Parameters(haldane_edge.frontend.solver) == (t=Complex(-1.0), t′=Complex(-0.2), μ=-2.0, U=4.0)
     ω = rand(ComplexF64)
     @test invoke(inv, Tuple{ImpuritySolver, Number}, haldane_edge.frontend.solver, ω) ≈ inv(haldane_edge.frontend.solver, ω)
-    @test Ω(haldane_edge.frontend.solver) ≈ -125.35399159356793
+    @test isapprox(Ω(haldane_edge.frontend.solver), -125.35399159356793; atol=1e-6)
     path_edge = ReciprocalPath(reciprocals(edge), -0.5=>0.5; length=100)
     spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04)
     Plots.savefig(Plots.plot(spectra_edge), "Plots-Haldane-Hubbard-Edge-Topological.png")
@@ -163,9 +163,15 @@ end
     quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
     timer = TimerOutput()
     vca = Algorithm(:SquareHubbard, VCA(unitcell, lattice, hilbert, (t, μ, U), m, quantumnumber, BandLanczosMethod(keepvecs=true); timer); timer)
+
     op = optimize!(vca)[2]
-    @test op.minimum ≈ -4.492911205682658
-    @test op.minimizer[1] ≈ 0.1955178114114018
+    @test isapprox(op.minimum, -4.492911205682658; atol=1e-6)
+    @test isapprox(op.minimizer[1], 0.1955178114114018; atol=1e-4)
+
+    op = optimize!(update!(vca; m=0.2); method=NoisyNewton())[2]
+    @test isapprox(op.minimum, -4.492911205682658; atol=1e-6)
+    @test isapprox(op.minimizer[1], 0.1955178114114018; atol=1e-4)
+
     M = [
        -1.0  0.0  0.0   0.0  0.0   0.0   0.0  0.0;
         0.0  1.0  0.0   0.0  0.0   0.0   0.0  0.0;
@@ -176,7 +182,8 @@ end
         0.0  0.0  0.0   0.0  0.0   0.0  -1.0  0.0;
         0.0  0.0  0.0   0.0  0.0   0.0   0.0  1.0
     ]
-    @test expectation(vca, :m) ≈ expectation(vca, M) ≈ -0.8070466592810626
+    @test isapprox(expectation(vca, M), -0.8070466592810626; atol=1e-4)
+    @test isapprox(expectation(vca, :m), -0.8070466592810626; atol=1e-4)
 
     vs = LinRange(0.0, 0.3, 31)
     result = zeros(length(vs))

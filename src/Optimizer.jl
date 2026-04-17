@@ -28,31 +28,31 @@ mutable struct NoisyNewtonState{R<:Real} <: Optim.AbstractOptimizerState
 end
 
 # Interface with Optim.jl
-function Optim.initial_state(method::NoisyNewton, options::Optim.Options, d, x₀)
+function Optim.optimize(f::Function, x₀::AbstractVector{<:Number}, method::NoisyNewton, options::Optim.Options)
     step = isempty(method.step) ? fill(1e-3, length(x₀)) : method.step
-    f_x, g_x, H_x = value_gradient_hessian(d.f, x₀, step)
+    f_x, g_x, H_x = value_gradient_hessian(f, x₀, step)
+    d = Optim.TwiceDifferentiable(f, g_x, H_x, x₀, f_x; inplace=false)
     accuracy = isempty(method.accuracy) ? fill(1e-6, length(x₀)) : method.accuracy
-    return NoisyNewtonState(copy(x₀), copy(x₀), f_x, f_x, g_x, H_x, step, copy(step), accuracy, 0)
+    state = NoisyNewtonState(copy(x₀), copy(x₀), f_x, f_x, g_x, H_x, step, copy(step), accuracy, 0)
+    return Optim.optimize(d, x₀, method, options, state)
 end
 function Optim.update_state!(d, state::NoisyNewtonState, method::NoisyNewton)
-    f_x, g_x, H_x = value_gradient_hessian(d.f, state.x, state.step)
-    state.f_x_previous = state.f_x
-    state.f_x = f_x
-    state.g_x = g_x
-    state.H_x = H_x
-    dx = -state.H_x \ g_x
+    if state.iteration > 0
+        f_x, g_x, H_x = value_gradient_hessian(d.f, state.x, state.step)
+        state.f_x_previous = state.f_x
+        state.f_x = f_x
+        state.g_x = g_x
+        state.H_x = H_x
+    end
+    dx = -state.H_x \ state.g_x
     state.x_previous = copy(state.x)
     state.x += dx
     state.iteration += 1
     multiplier = 2.0
     for i in eachindex(state.step)
         state.step[i] = abs(dx[i])
-        if state.step[i] > state.step₀[i]
-            state.step[i] = multiplier * state.step₀[i]
-        end
-        if state.step[i] < multiplier * state.accuracy[i]
-            state.step[i] = multiplier * state.accuracy[i]
-        end
+        state.step[i] > state.step₀[i] && (state.step[i] = multiplier * state.step₀[i])
+        state.step[i] < multiplier * state.accuracy[i] && (state.step[i] = multiplier * state.accuracy[i])
     end
     return false
 end
@@ -67,9 +67,10 @@ function Optim.trace!(tr, d, state::NoisyNewtonState, iteration::Integer, ::Nois
     end
     Optim.update!(tr, iteration, state.f_x, norm(state.g_x), dt, options.store_trace, options.show_trace, options.show_every)
 end
+@inline Optim.update_fgh!(d, state::NoisyNewtonState, method::NoisyNewton) = nothing
 
 # Get the function value and the gradient as well as Hessian matrix by finite difference method.
-function value_gradient_hessian(f, x, step)
+function value_gradient_hessian(f::Function, x::AbstractVector{<:Number}, step::AbstractVector{<:Number})
     n = length(x)
     N = 1 + 2 * n + div(n * (n - 1), 2)
     y = zeros(Float64, N)
