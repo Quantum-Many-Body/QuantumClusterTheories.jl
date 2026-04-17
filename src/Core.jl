@@ -369,9 +369,11 @@ struct DynamicalSpectraData{R<:ReciprocalSpace} <: Data
 end
 function run!(qct::Algorithm{<:QCT}, ds::Assignment{<:DynamicalSpectra}; η::Real=0.1, rescale::Function=identity, options...)
     result = zeros(length(ds.action.energies), length(ds.action.reciprocalspace))
+    Vs = [qct.frontend.perturbation(k) for k in ds.action.reciprocalspace]
     for (i, ω) in enumerate(ds.action.energies)
-        for (j, k) in enumerate(ds.action.reciprocalspace)
-            result[i, j] = rescale(-imag(tr(qct(ω+1im*η, k))))
+        G⁻¹ = inv(qct.frontend.solver, ω+1im*η)
+        for (j, (k, V)) in enumerate(zip(ds.action.reciprocalspace, Vs))
+            result[i, j] = rescale(-imag(tr(qct.frontend.periodization(inv(G⁻¹-V), k))))
         end
     end
     return DynamicalSpectraData(ds.action.reciprocalspace, ds.action.energies, result)
