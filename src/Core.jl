@@ -98,7 +98,7 @@ end
     return perturbation
 end
 @inline function (perturbation::VCAPerturbation)(k::Union{AbstractVector{<:Number}, Nothing}=nothing)
-    return matrix(perturbation.intercluster, k) - matrix(perturbation.weiss, k)
+    return matrix(perturbation.intercluster, k) - matrix(perturbation.weiss)
 end
 
 """
