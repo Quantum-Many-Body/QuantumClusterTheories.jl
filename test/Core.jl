@@ -56,7 +56,7 @@ import Plots
     @test inv(ω*I-m) ≈ solver(ω)
     @test invoke(inv, Tuple{ImpuritySolver, Number}, solver, ω) ≈ inv(solver, ω)
 
-    cpt = CPT(unitcell, lattice, hilbert, terms, quantumnumber)
+    cpt = Algorithm(:Square, CPT(unitcell, lattice, hilbert, terms, quantumnumber))
     @test cpt(ω, k) ≈ inv(ω*I-[2cos(k[1])+2cos(k[2]) 0; 0 2cos(k[1])+2cos(k[2])])
     @test isapprox(Ω(cpt), -1.621072213728453; atol=1e-6)
 end
@@ -205,14 +205,14 @@ end
     μ = Onsite(:μ, -1.2)
     quantumnumber = 𝕊ᶻ(0)
     timer = TimerOutput()
-    vca = Algorithm(:SquareHubbard, VCA(unitcell, lattice, hilbert, (t, μ, U), Δ, quantumnumber, BandLanczosMethod(keepvecs=true); timer); timer)
+    vca = Algorithm(:SquareHubbard, VCA(unitcell, lattice, hilbert, (t, μ, U), Δ, quantumnumber; timer); timer)
     op = optimize!(vca)[2]
     @test isapprox(op.minimum, -1.8009791486051883; atol=1e-6)
     @test isapprox(op.minimizer[1], 0.1498396060343398; atol=1e-4)
 
     vs = LinRange(0.0, 0.3, 31)
     result = zeros(length(vs))
-    @time for (i, v) in enumerate(vs)
+    for (i, v) in enumerate(vs)
         update!(vca; Δ=v)
         result[i] = Ω(vca)
     end

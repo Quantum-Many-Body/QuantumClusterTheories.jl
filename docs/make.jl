@@ -20,8 +20,8 @@ makedocs(;
         ],
             "Examples" => [
             "examples/Introduction.md",
-            "examples/SquareHubbardSpectral.md",
-            "examples/HaldaneHubbardTopologicalPhaseTransition.md",
+            "examples/SquareHubbard.md",
+            "examples/HaldaneHubbard.md",
         ]
     ],
 )
