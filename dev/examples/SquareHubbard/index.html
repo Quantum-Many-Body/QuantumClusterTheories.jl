@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Fermi Hubbard Model on Square Lattice · QuantumClusterTheories.jl</title><meta name="title" content="Fermi Hubbard Model on Square Lattice · QuantumClusterTheories.jl"/><meta property="og:title" content="Fermi Hubbard Model on Square Lattice · QuantumClusterTheories.jl"/><meta property="twitter:title" content="Fermi Hubbard Model on Square Lattice · QuantumClusterTheories.jl"/><meta name="description" content="Documentation for QuantumClusterTheories.jl."/><meta property="og:description" content="Documentation for QuantumClusterTheories.jl."/><meta property="twitter:description" content="Documentation for QuantumClusterTheories.jl."/><meta property="og:url" content="https://Quantum-Many-Body.github.io/QuantumClusterTheories.jl/examples/SquareHubbard/"/><meta property="twitter:url" content="https://Quantum-Many-Body.github.io/QuantumClusterTheories.jl/examples/SquareHubbard/"/><link rel="canonical" href="https://Quantum-Many-Body.github.io/QuantumClusterTheories.jl/examples/SquareHubbard/"/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script><link href="../../assets/favicon.ico" rel="icon" type="image/x-icon"/></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../../"><img src="../../assets/logo.png" alt="QuantumClusterTheories.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../../">QuantumClusterTheories.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><span class="tocitem">Manual</span><ul><li><a class="tocitem" href="../../manual/QuantumClusterTheories/">QuantumClusterTheories</a></li></ul></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../Introduction/">Introduction</a></li><li class="is-active"><a class="tocitem" href>Fermi Hubbard Model on Square Lattice</a><ul class="internal"><li><a class="tocitem" href="#Single-particle-Spectral-Function"><span>Single-particle Spectral Function</span></a></li><li><a class="tocitem" href="#Antiferromagnetic-Order"><span>Antiferromagnetic Order</span></a></li><li><a class="tocitem" href="#d-wave-Superconductivity"><span>d-wave Superconductivity</span></a></li></ul></li><li><a class="tocitem" href="../HaldaneHubbard/">Haldane-Hubbard Model: Topological Phase Transition</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Fermi Hubbard Model on Square Lattice</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Fermi Hubbard Model on Square Lattice</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/Quantum-Many-Body/QuantumClusterTheories.jl/blob/main/docs/src/examples/SquareHubbard.md#" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Fermi-Hubbard-Model-on-Square-Lattice"><a class="docs-heading-anchor" href="#Fermi-Hubbard-Model-on-Square-Lattice">Fermi Hubbard Model on Square Lattice</a><a id="Fermi-Hubbard-Model-on-Square-Lattice-1"></a><a class="docs-heading-anchor-permalink" href="#Fermi-Hubbard-Model-on-Square-Lattice" title="Permalink"></a></h1><h2 id="Single-particle-Spectral-Function"><a class="docs-heading-anchor" href="#Single-particle-Spectral-Function">Single-particle Spectral Function</a><a id="Single-particle-Spectral-Function-1"></a><a class="docs-heading-anchor-permalink" href="#Single-particle-Spectral-Function" title="Permalink"></a></h2><p>The following code can compute the single-particle spectral function of the Fermi Hubbard model on a square lattice using cluster perturbation theory (CPT).</p><pre><code class="language-julia hljs">using ExactDiagonalization
+using LinearAlgebra: tr
+using QuantumLattices
+using QuantumClusterTheories
+using TightBindingApproximation
+import Plots
+
+# define the unitcell of the square lattice
+unitcell = Lattice([0.0, 0.0]; name=:Square, vectors=[[1.0, 0.0], [0.0, 1.0]])
+
+# define a finite 2×2 cluster of the square lattice with periodic boundary condition
+lattice = Lattice(unitcell, (2, 2), (&#39;P&#39;, &#39;P&#39;))
+
+# define the Hilbert space (single-orbital spin-1/2 complex fermion)
+hilbert = Hilbert(site=&gt;Fock{:f}(1, 2) for site in eachindex(lattice))
+
+# define the terms
+# i.e. the nearest-neighbor hopping, the Hubbard interaction, and the chemical potential
+t = Hopping(:t, -1.0, 1)
+U = Hubbard(:U, 8.0)
+μ = Onsite(:μ, -U.value/2)
+
+# define the quantum number of the sub-Hilbert space in which to carry out the computation
+# here the particle number is set to be `length(lattice)` and Sz is set to be 0
+quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
+
+# define the CPT frontend with exact diagonalization as the impurity solver
+cpt = Algorithm(:SquareHubbard, CPT(unitcell, lattice, hilbert, (t, μ, U), quantumnumber))
+
+# define the energy range and the momentum path
+es = LinRange(-10.0, 10.0, 501)
+path = ReciprocalPath(reciprocals(unitcell), rectangle&quot;Γ-X-M-Γ&quot;; length=100)
+
+# compute the spectral function along the path
+spectra = cpt(:EB, DynamicalSpectra(path, es); η=0.1)
+
+# plot the spectral function
+Plots.plot(spectra)</code></pre><img src="01ae9f37.svg" alt="Example block output"/><h2 id="Antiferromagnetic-Order"><a class="docs-heading-anchor" href="#Antiferromagnetic-Order">Antiferromagnetic Order</a><a id="Antiferromagnetic-Order-1"></a><a class="docs-heading-anchor-permalink" href="#Antiferromagnetic-Order" title="Permalink"></a></h2><p>The following code demonstrates the study of the antiferromagnetic (AFM) phase in the square lattice Hubbard model using variational cluster approach (VCA). The AFM order is captured by introducing its corresponding Weiss field.</p><pre><code class="language-julia hljs">using ExactDiagonalization
+using LinearAlgebra: dot
+using QuantumLattices
+using QuantumClusterTheories
+import Plots
+
+# define the lattice
+unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
+lattice = Lattice(unitcell, (2, 2), (&#39;P&#39;, &#39;P&#39;))
+
+# define the Hilbert space (single-orbital spin-1/2 complex fermion)
+hilbert = Hilbert(site=&gt;Fock{:f}(1, 2) for site in eachindex(lattice))
+
+# define Hamiltonian terms
+t = Hopping(:t, -1.0, 1)
+U = Hubbard(:U, 8.0)
+m = Onsite(
+    :m, 0.3, 𝕔⁺𝕔(:, :, σᶻ);
+    amplitude=bond::Bond -&gt; real(exp(1im*dot((π, π), rcoordinate(bond))))
+)
+μ = Onsite(:μ, -U.value/2)
+
+# quantum number for the sector (particle number and Sz)
+quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
+
+# initialize VCA
+vca = Algorithm(:SquareHubbard, VCA(unitcell, lattice, hilbert, (t, μ, U), m, quantumnumber))
+
+# get the variational free energy curve
+vs = LinRange(0.0, 0.3, 31)
+result = zeros(length(vs))
+for (i, v) in enumerate(vs)
+    update!(vca; m=v)
+    result[i] = Ω(vca)
+end
+Plots.plot(vs, result; label=&quot;Ω(m)&quot;)</code></pre><img src="fb7dd165.svg" alt="Example block output"/><p>The staggered magnetization term <code>m</code> has an amplitude that alternates in sign according to <code>exp(1im*dot((π, π), rcoordinate(bond)))</code>, which is the Weiss field that induces the AFM order on the bipartite lattice. The chemical potential is set to <code>-U/2</code> to achieve half-filling. The minimum of the free energy corresponds to a physical solution of the symmetry breaking phase.</p><h2 id="d-wave-Superconductivity"><a class="docs-heading-anchor" href="#d-wave-Superconductivity">d-wave Superconductivity</a><a id="d-wave-Superconductivity-1"></a><a class="docs-heading-anchor-permalink" href="#d-wave-Superconductivity" title="Permalink"></a></h2><p>The following code demonstrates the study of the d-wave superconducting (dSC) phase in the square lattice Hubbard model using VCA. The dSC order is captured by introducing its corresponding pairing Weiss field.</p><pre><code class="language-julia hljs">using ExactDiagonalization
+using LinearAlgebra: dot
+using QuantumLattices
+using QuantumClusterTheories
+import Plots
+
+# define the lattice
+unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
+lattice = Lattice(unitcell, (2, 2), (&#39;P&#39;, &#39;P&#39;))
+
+# define the Hilbert space (single-orbital spin-1/2 complex fermion)
+hilbert = Hilbert(site=&gt;Fock{:f}(1, 2) for site in eachindex(lattice))
+
+# define Hamiltonian terms
+t = Hopping(:t, -1.0, 1)
+U = Hubbard(:U, 8.0)
+Δ = Pairing(
+    :Δ, 0.2, 1, 𝕔𝕔(:, :, real(1im*σʸ));
+    amplitude=bond::Bond -&gt; real(exp(2im*azimuth(rcoordinate(bond))))
+)
+μ = Onsite(:μ, -1.2)
+
+# quantum number for the sector (Sz only)
+quantumnumber = 𝕊ᶻ(0)
+
+# initialize VCA
+vca = Algorithm(:SquareHubbard, VCA(unitcell, lattice, hilbert, (t, μ, U), Δ, quantumnumber))
+
+# get the variational free energy curve
+vs = LinRange(0.0, 0.3, 31)
+result = zeros(length(vs))
+for (i, v) in enumerate(vs)
+    update!(vca; Δ=v)
+    result[i] = Ω(vca)
+end
+Plots.plot(vs, result; label=&quot;Ω(Δ)&quot;)</code></pre><img src="884cae64.svg" alt="Example block output"/><p>The pairing term <code>Δ</code> has d-wave symmetry encoded in its amplitude <code>real(exp(2im*azimuth(rcoordinate(bond))))</code>, which changes sign under 90-degree rotations. This is the pairing Weiss field that induces the dSC order. The chemical potential is set away from half-filling (<code>-1.2</code>) to favor superconductivity.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../Introduction/">« Introduction</a><a class="docs-footer-nextpage" href="../HaldaneHubbard/">Haldane-Hubbard Model: Topological Phase Transition »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Wednesday 22 April 2026 13:54">Wednesday 22 April 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
