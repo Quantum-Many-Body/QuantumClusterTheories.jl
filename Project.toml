@@ -19,11 +19,11 @@ ExactDiagonalization = "52dcaa32-6da7-11e9-20ef-755843cf72eb"
 QuantumClusterTheoriesExactDiagonalizationExt = ["ExactDiagonalization"]
 
 [compat]
-ExactDiagonalization = "0.3.3"
+ExactDiagonalization = "0.3.4"
 LinearAlgebra = "1.10 - 1"
 Optim = "1.7 - 2"
 QuadGK = "2.11 - 2"
-QuantumLattices = "0.14.6"
+QuantumLattices = "0.14.7"
 StaticArrays = "1.4 - 1"
 TightBindingApproximation = "0.3.7"
 TimerOutputs = "0.5"

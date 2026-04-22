@@ -57,12 +57,7 @@ quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
 # CPT algorithm setup
 haldane = Algorithm(
     :HaldaneHubbard,
-    CPT(
-        unitcell, lattice, hilbert,
-        (t, t′, μ, U),
-        quantumnumber,
-        BandLanczosMethod(keepvecs=true)
-    ),
+    CPT(unitcell, lattice, hilbert, (t, t′, μ, U), quantumnumber),
     parameters,
     parammap
 )
@@ -89,8 +84,7 @@ haldane_edge = Algorithm(
     CPT(
         edge, edge, hilbert_edge,
         (t, t′, μ, U),
-        ntuple(i->(6(i-1)+1, 6(i-1)+2, 6(i-1)+3, 6(i-1)+4, 6(i-1)+5, 6(i-1)+6), num)=>quantumnumber,
-        BandLanczosMethod(keepvecs=true)
+        ntuple(i->(6(i-1)+1, 6(i-1)+2, 6(i-1)+3, 6(i-1)+4, 6(i-1)+5, 6(i-1)+6), num)=>quantumnumber
     ),
     parameters,
     parammap

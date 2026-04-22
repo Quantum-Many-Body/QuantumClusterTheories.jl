@@ -103,7 +103,7 @@ end
     timer = TimerOutput()
     haldane = Algorithm(
         :HaldaneHubbard,
-        CPT(unitcell, lattice, hilbert, (t, t′, μ, U), quantumnumber, BandLanczosMethod(keepvecs=true); timer),
+        CPT(unitcell, lattice, hilbert, (t, t′, μ, U), quantumnumber; timer),
         parameters,
         parammap;
         timer
@@ -131,7 +131,7 @@ end
     hilbert_edge = Hilbert(Fock{:f}(1, 2), length(edge))
     haldane_edge = Algorithm(
         :HaldaneHubbardEdge,
-        CPT(edge, edge, hilbert_edge, (t, t′, μ, U), ntuple(i->(6(i-1)+1, 6(i-1)+2, 6(i-1)+3, 6(i-1)+4, 6(i-1)+5, 6(i-1)+6), num)=>quantumnumber, BandLanczosMethod(keepvecs=true); timer),
+        CPT(edge, edge, hilbert_edge, (t, t′, μ, U), ntuple(i->(6(i-1)+1, 6(i-1)+2, 6(i-1)+3, 6(i-1)+4, 6(i-1)+5, 6(i-1)+6), num)=>quantumnumber; timer),
         parameters,
         parammap;
         timer
@@ -162,7 +162,7 @@ end
     μ = Onsite(:μ, -U.value/2)
     quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
     timer = TimerOutput()
-    vca = Algorithm(:SquareHubbard, VCA(unitcell, lattice, hilbert, (t, μ, U), m, quantumnumber, BandLanczosMethod(keepvecs=true); timer); timer)
+    vca = Algorithm(:SquareHubbard, VCA(unitcell, lattice, hilbert, (t, μ, U), m, quantumnumber; timer); timer)
 
     op = optimize!(vca)[2]
     @test isapprox(op.minimum, -4.492911205682658; atol=1e-6)
@@ -193,4 +193,29 @@ end
     end
     Plots.savefig(Plots.plot(vs, result), "Plots-Square-Hubbard-AFM.png")
     Makie.save("Makie-Square-Hubbard-AFM.png", Makie.lines(vs, result))
+end
+
+@testset "Square-Hubbard-dSC" begin
+    unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
+    lattice = Lattice(unitcell, (2, 2), ('P', 'P'))
+    hilbert = Hilbert(site=>Fock{:f}(1, 2) for site in eachindex(lattice))
+    t = Hopping(:t, -1.0, 1)
+    U = Hubbard(:U, 8.0)
+    Δ = Pairing(:Δ, 0.2, 1, 𝕔𝕔(:, :, real(1im*σʸ)); amplitude=bond::Bond -> real(exp(2im*azimuth(rcoordinate(bond)))))
+    μ = Onsite(:μ, -1.2)
+    quantumnumber = 𝕊ᶻ(0)
+    timer = TimerOutput()
+    vca = Algorithm(:SquareHubbard, VCA(unitcell, lattice, hilbert, (t, μ, U), Δ, quantumnumber, BandLanczosMethod(keepvecs=true); timer); timer)
+    op = optimize!(vca)[2]
+    @test isapprox(op.minimum, -1.8009791486051883; atol=1e-6)
+    @test isapprox(op.minimizer[1], 0.1498396060343398; atol=1e-4)
+
+    vs = LinRange(0.0, 0.3, 31)
+    result = zeros(length(vs))
+    @time for (i, v) in enumerate(vs)
+        update!(vca; Δ=v)
+        result[i] = Ω(vca)
+    end
+    Plots.savefig(Plots.plot(vs, result), "Plots-Square-Hubbard-dSC.png")
+    Makie.save("Makie-Square-Hubbard-dSC.png", Makie.lines(vs, result))
 end

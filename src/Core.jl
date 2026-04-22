@@ -263,9 +263,11 @@ function Ω(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct
     end
     part₁ = quadgk(f, 0, Inf; atol, rtol, maxevals)[1]
     part₂ = real(mapreduce(tr, +, Vs)) / length(brillouinzone) / 2
-    result = (Ω(qct.solver) + part₁ + part₂) / count(qct.periodization)
+    result = (Ω(qct.solver) + (part₁ + part₂)/factor(kind(qct.perturbation))) / count(qct.periodization)
     return result::Float64
 end
+@inline factor(::TBAKind{:TBA}) = 1
+@inline factor(::TBAKind{:BdG}) = 2
 
 """
     expectation(qct::Algorithm{<:QCT}, m::Union{AbstractMatrix{<:Number}, Function, Symbol}; kwargs...) -> Float64
