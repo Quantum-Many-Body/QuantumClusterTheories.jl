@@ -9,7 +9,7 @@ using TimerOutputs: TimerOutput
 using Optim: LBFGS, Options, optimize
 using QuadGK: quadgk
 using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, BrillouinZone, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
-using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubordinate, lazy, matrix, nneighbor, plain, rank, rcoordinate, reciprocals, rtol
+using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubordinate, matrix, nneighbor, rank, rcoordinate, reciprocals, rtol
 using StaticArrays: SVector
 using TightBindingApproximation: Quadraticization, TBA, TBAKind, commutator
 import QuantumLattices: Parameters, kind, options, run!, update!

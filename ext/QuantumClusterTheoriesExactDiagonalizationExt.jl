@@ -2,7 +2,7 @@ module QuantumClusterTheoriesExactDiagonalizationExt
 
 using ExactDiagonalization: Abelian, BandLanczosMethod, ED, EDKind, EDMatrixization, GreenFunctionMethod, RetardedGreenFunction, Sector, normalize
 using LinearAlgebra: eigen
-using QuantumLattices: AbstractLattice, Generator, Hilbert, Lattice, Metric, Neighbors, OneAtLeast, OneOrMore, QuantumOperator, Table, Term, bonds, isintracell, kind, nneighbor, eager, plain
+using QuantumLattices: AbstractLattice, Generator, Hilbert, Lattice, Metric, Neighbors, OneAtLeast, OneOrMore, QuantumOperator, Table, Term, bonds, isintracell, kind, nneighbor
 using QuantumClusterTheories: Periodization, Perturbation, QCT, operators, qcttimer, quadratic
 using TightBindingApproximation: TBAKind
 using TimerOutputs: TimerOutput
@@ -103,7 +103,7 @@ function ImpuritySolver(
     lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
     neighbors::Union{Int, Neighbors}=nneighbor(terms), timer::TimerOutput=qcttimer
 )
-    system = Generator(filter!(isintracell, bonds(lattice, neighbors)), hilbert, normalize(terms), plain, eager; half=false)
+    system = Generator(filter!(isintracell, bonds(lattice, neighbors)), hilbert, normalize(terms); half=false)
     edkind = EDKind(hilbert)
     table = Table(hilbert, Metric(edkind, hilbert))
     sectors = broadcast(Sector, OneOrMore(quantumnumbers), hilbert; table)

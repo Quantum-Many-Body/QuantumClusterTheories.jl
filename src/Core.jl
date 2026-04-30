@@ -76,7 +76,7 @@ end
 function Perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term})
     terms = quadratic(OneOrMore(terms))
     kind = TBAKind(typeof(terms), valtype(hilbert))
-    H = Generator(bonds, hilbert, terms, plain, lazy; half=false)
+    H = Generator(bonds, hilbert, terms; half=false)
     quadraticization = Quadraticization{typeof(kind)}(Table(hilbert, Metric(kind, hilbert)))
     commt = commutator(kind, hilbert)
     return CPTPerturbation(TBA{typeof(kind)}(H, quadraticization, commt))
@@ -127,8 +127,8 @@ function Perturbation(bonds₁::AbstractVector{<:Bond}, bonds₂::AbstractVector
     terms = quadratic(OneOrMore(terms))
     weiss = quadratic(OneOrMore(weiss))
     kind = TBAKind(typeof((terms..., weiss...)), valtype(hilbert))
-    H = Generator(bonds₁, hilbert, terms, plain, lazy; half=false)
-    W = Generator(bonds₂, hilbert, weiss, plain, lazy; half=false)
+    H = Generator(bonds₁, hilbert, terms; half=false)
+    W = Generator(bonds₂, hilbert, weiss; half=false)
     quadraticization = Quadraticization{typeof(kind)}(Table(hilbert, Metric(kind, hilbert)))
     commt = commutator(kind, hilbert)
     return VCAPerturbation(TBA{typeof(kind)}(H, quadraticization, commt), TBA{typeof(kind)}(W, quadraticization, commt))
@@ -283,7 +283,7 @@ For `Algorithm{<:QCT}`, this delegates to the second method.
 @inline expectation(qct::Algorithm{<:QCT}, m::Union{AbstractMatrix{<:Number}, Function, Symbol}; kwargs...) = expectation(qct.frontend, m; kwargs...)
 function expectation(qct::VCA, m::Symbol; kwargs...)
     weiss = update!(deepcopy(qct.perturbation.weiss); m=>1)
-    selected = TBA{typeof(kind(weiss))}(expand(weiss.system, m), weiss.quadraticization, weiss.commutator)
+    selected = TBA{typeof(kind(weiss))}(Generator(expand(weiss.system, m)), weiss.quadraticization, weiss.commutator)
     f(k::AbstractVector{<:Number}) = matrix(selected, k).H.data
     return expectation(qct, f; kwargs...)
 end
