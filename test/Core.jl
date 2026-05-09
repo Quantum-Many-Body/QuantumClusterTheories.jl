@@ -52,6 +52,7 @@ import Plots
 
     quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
     solver = ImpuritySolver(lattice, hilbert, terms, quantumnumber)
+    @test valtype(solver) == Matrix{ComplexF64}
     ω = rand(ComplexF64)
     @test inv(ω*I-m) ≈ solver(ω)
     @test invoke(inv, Tuple{ImpuritySolver, Number}, solver, ω) ≈ inv(solver, ω)

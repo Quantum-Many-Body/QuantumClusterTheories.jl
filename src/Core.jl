@@ -29,12 +29,13 @@ Extract the quadratic (rank-2) terms from a collection of terms.
 @generated quadratic(terms::OneAtLeast{Term}) = Expr(:tuple, [:(terms[$i]) for (i, T) in enumerate(fieldtypes(terms)) if rank(T)==2]...)
 
 """
-    ImpuritySolver
+    ImpuritySolver <: Frontend
 
 Abstract type for impurity solvers used in quantum cluster theory calculations.
 Subtypes must implement the call syntax `solver(ω)` to return the solver's response function at frequency `ω`.
 """
-abstract type ImpuritySolver end
+abstract type ImpuritySolver  <: Frontend end
+@inline Base.valtype(::Type{<:ImpuritySolver}) = Matrix{ComplexF64}
 
 """
     inv(solver::ImpuritySolver, ω::Number) -> Matrix{ComplexF64}
