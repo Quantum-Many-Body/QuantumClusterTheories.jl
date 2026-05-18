@@ -7,7 +7,7 @@ using QuantumClusterTheories: Periodization, Perturbation, QCT, operators, qctti
 using TightBindingApproximation: TBAKind
 using TimerOutputs: TimerOutput
 import QuantumClusterTheories: CPT, ImpuritySolver, VCA, Ω
-import QuantumLattices: Parameters, update!
+import QuantumLattices: Parameters, contenttocache, contenttoconfig, qlcsave, qlload, stamp, update!
 
 """
     Cache
@@ -39,10 +39,23 @@ mutable struct EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:Re
     end
 end
 @inline Parameters(solver::EDSolver) = Parameters(solver.ed)
+@inline contenttocache(solver::EDSolver) = (Ω=solver.Ω, gf=solver.gf)
+@inline contenttoconfig(solver::EDSolver) = (contenttoconfig(solver.ed), solver.operators, solver.method)
 function set!(solver::EDSolver; ω::Number=1e-4im)
-    eigensystem = eigen(solver.ed; nev=1, timer=solver.timer)
-    solver.Ω, v₀, sector₀ = only(eigensystem.values), only(eigensystem.vectors), only(eigensystem.sectors)
-    solver.gf = RetardedGreenFunction(solver.operators, solver.ed, solver.method; e₀=solver.Ω, v₀=v₀, sector₀=sector₀, timer=solver.timer)
+    cached = try
+        qlload(pathof(solver, :cache), stamp(solver))
+    catch
+        nothing
+    end
+    if isnothing(cached)
+        eigensystem = eigen(solver.ed; nev=1, timer=solver.timer)
+        solver.Ω, v₀, sector₀ = only(eigensystem.values), only(eigensystem.vectors), only(eigensystem.sectors)
+        solver.gf = RetardedGreenFunction(solver.operators, solver.ed, solver.method; e₀=solver.Ω, v₀=v₀, sector₀=sector₀, timer=solver.timer)
+        qlcsave(solver)
+    else
+        solver.Ω = cached.Ω
+        solver.gf = cached.gf
+    end
     solver.G = Cache(ω, solver.gf(ω))
     solver.G⁻¹ = Cache(ω, inv(solver.G.data))
     return solver
