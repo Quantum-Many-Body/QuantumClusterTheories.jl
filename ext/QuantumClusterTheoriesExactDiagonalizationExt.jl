@@ -43,7 +43,7 @@ end
 @inline contenttoconfig(solver::EDSolver) = (contenttoconfig(solver.ed), solver.operators, solver.method)
 function set!(solver::EDSolver; ω::Number=1e-4im)
     cached = try
-        qlload(pathof(solver, :cache), stamp(solver))
+        qlload(pathof(solver, :cache), stamp(solver; ndecimal=14))
     catch
         nothing
     end
@@ -51,7 +51,7 @@ function set!(solver::EDSolver; ω::Number=1e-4im)
         eigensystem = eigen(solver.ed; nev=1, timer=solver.timer)
         solver.Ω, v₀, sector₀ = only(eigensystem.values), only(eigensystem.vectors), only(eigensystem.sectors)
         solver.gf = RetardedGreenFunction(solver.operators, solver.ed, solver.method; e₀=solver.Ω, v₀=v₀, sector₀=sector₀, timer=solver.timer)
-        qlcsave(solver)
+        qlcsave(solver; ndecimal=14)
     else
         solver.Ω = cached.Ω
         solver.gf = cached.gf
