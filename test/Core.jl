@@ -59,7 +59,7 @@ import Plots
 
     cpt = Algorithm(:Square, CPT(unitcell, lattice, hilbert, terms, quantumnumber))
     @test cpt(ω, k) ≈ inv(ω*I-[2cos(k[1])+2cos(k[2]) 0; 0 2cos(k[1])+2cos(k[2])])
-    @test isapprox(Ω(cpt), -1.621072213728453; atol=1e-6)
+    @test isapprox(Ω(cpt), -1.6210722; atol=1e-6)
 end
 
 @testset "Square-Hubbard-Spectral" begin
@@ -72,13 +72,31 @@ end
     quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
     timer = TimerOutput()
     cpt = Algorithm(:SquareHubbard, CPT(unitcell, lattice, hilbert, (t, μ, U), quantumnumber; timer); timer)
-    @test isapprox(Ω(cpt), -4.4444120382788945; atol=1e-6)
+    @test isapprox(Ω(cpt), -4.4444120; atol=1e-6)
 
     es = LinRange(-10.0, 10.0, 501)
     path = ReciprocalPath(reciprocals(unitcell), rectangle"Γ-X-M-Γ"; length=100)
     spectra = cpt(:EB, DynamicalSpectra(path, es); η=0.1)
     Plots.savefig(Plots.plot(spectra), "Plots-Hubbard-Square-2x2-spectral.png")
     Makie.save("Makie-Hubbard-Square-2x2-spectral.png", Makie.plot(spectra))
+end
+
+@testset "Operator-based CPT/VCA" begin
+    unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
+    lattice = Lattice(unitcell, (2, 2), ('P', 'P'))
+    hilbert = Hilbert(Fock{:f}(1, 2), length(lattice))
+    t = Hopping(:t, -1.0, 1)
+    U = Hubbard(:U, 8.0)
+    μ = Onsite(:μ, -U.value/2)
+    m = Onsite(:m, 0.2, 𝕔⁺𝕔(:, :, σᶻ); amplitude=bond::Bond -> real(exp(1im*dot((π, π), rcoordinate(bond)))))
+    quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
+    operators = expand(OperatorGenerator(bonds(unitcell, 1), Hilbert(Fock{:f}(1, 2), length(unitcell)), (t, μ)))
+
+    # Operator-based CPT/VCA: all rank-2 terms (t, μ) as unitcell operators, only rank-4 (U) as interactions
+    cpt = CPT(unitcell, operators, lattice, hilbert, U, quantumnumber)
+    @test isapprox(Ω(cpt), -4.4444120; atol=1e-6)
+    vca = VCA(unitcell, operators, lattice, hilbert, U, m, quantumnumber)
+    @test isapprox(Ω(vca), -4.4929057; atol=1e-6)
 end
 
 @testset "Haldane-Hubbard" begin
@@ -141,7 +159,7 @@ end
     @test Parameters(haldane_edge.frontend.solver) == (t=Complex(-1.0), t′=Complex(-0.2), μ=-2.0, U=4.0)
     ω = rand(ComplexF64)
     @test invoke(inv, Tuple{ImpuritySolver, Number}, haldane_edge.frontend.solver, ω) ≈ inv(haldane_edge.frontend.solver, ω)
-    @test isapprox(Ω(haldane_edge.frontend.solver), -125.35399159356793; atol=1e-6)
+    @test isapprox(Ω(haldane_edge.frontend.solver), -125.3539916; atol=1e-6)
     path_edge = ReciprocalPath(reciprocals(edge), -0.5=>0.5; length=100)
     spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04)
     Plots.savefig(Plots.plot(spectra_edge), "Plots-Haldane-Hubbard-Edge-Topological.png")
@@ -159,19 +177,19 @@ end
     hilbert = Hilbert(site=>Fock{:f}(1, 2) for site in eachindex(lattice))
     t = Hopping(:t, -1.0, 1)
     U = Hubbard(:U, 8.0)
-    m = Onsite(:m, 0.3, 𝕔⁺𝕔(:, :, σᶻ); amplitude=bond::Bond -> real(exp(1im*dot((π, π), rcoordinate(bond)))))
+    m = Onsite(:m, 0.2, 𝕔⁺𝕔(:, :, σᶻ); amplitude=bond::Bond -> real(exp(1im*dot((π, π), rcoordinate(bond)))))
     μ = Onsite(:μ, -U.value/2)
     quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
     timer = TimerOutput()
     vca = Algorithm(:SquareHubbard, VCA(unitcell, lattice, hilbert, (t, μ, U), m, quantumnumber; timer); timer)
 
     op = optimize!(vca)[2]
-    @test isapprox(op.minimum, -4.492911205682658; atol=1e-6)
-    @test isapprox(op.minimizer[1], 0.1955178114114018; atol=1e-4)
+    @test isapprox(op.minimum, -4.4929112; atol=1e-6)
+    @test isapprox(op.minimizer[1], 0.19552; atol=1e-4)
 
     op = optimize!(update!(vca; m=0.2); method=NoisyNewton())[2]
-    @test isapprox(op.minimum, -4.492911205682658; atol=1e-6)
-    @test isapprox(op.minimizer[1], 0.1955178114114018; atol=1e-4)
+    @test isapprox(op.minimum, -4.4929112; atol=1e-6)
+    @test isapprox(op.minimizer[1], 0.19552; atol=1e-4)
 
     M = [
        -1.0  0.0  0.0   0.0  0.0   0.0   0.0  0.0;
@@ -183,8 +201,8 @@ end
         0.0  0.0  0.0   0.0  0.0   0.0  -1.0  0.0;
         0.0  0.0  0.0   0.0  0.0   0.0   0.0  1.0
     ]
-    @test isapprox(expectation(vca, M), -0.8070466592810626; atol=1e-4)
-    @test isapprox(expectation(vca, :m), -0.8070466592810626; atol=1e-4)
+    @test isapprox(expectation(vca, M), -0.80705; atol=1e-4)
+    @test isapprox(expectation(vca, :m), -0.80705; atol=1e-4)
 
     vs = LinRange(0.0, 0.3, 31)
     result = zeros(length(vs))
@@ -208,8 +226,8 @@ end
     timer = TimerOutput()
     vca = Algorithm(:SquareHubbard, VCA(unitcell, lattice, hilbert, (t, μ, U), Δ, quantumnumber; timer); timer)
     op = optimize!(vca)[2]
-    @test isapprox(op.minimum, -1.8009791486051883; atol=1e-6)
-    @test isapprox(op.minimizer[1], 0.1498396060343398; atol=1e-4)
+    @test isapprox(op.minimum, -1.8009791; atol=1e-6)
+    @test isapprox(op.minimizer[1], 0.14984; atol=1e-4)
 
     vs = LinRange(0.0, 0.3, 31)
     result = zeros(length(vs))

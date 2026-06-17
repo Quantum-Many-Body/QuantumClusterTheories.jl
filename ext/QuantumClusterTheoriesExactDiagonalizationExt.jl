@@ -1,10 +1,10 @@
 module QuantumClusterTheoriesExactDiagonalizationExt
 
-using ExactDiagonalization: Abelian, BandLanczosMethod, ED, EDKind, EDMatrixization, GreenFunctionMethod, RetardedGreenFunction, Sector, normalize
-using LinearAlgebra: eigen
-using QuantumLattices: AbstractLattice, Generator, Hilbert, Lattice, Metric, Neighbors, OneAtLeast, OneOrMore, QuantumOperator, Table, Term, bonds, isintracell, kind, nneighbor
+using ExactDiagonalization: Abelian, BandLanczosMethod, ED, GreenFunctionMethod, RetardedGreenFunction, normalize
+using LinearAlgebra: eigen, norm
+using QuantumLattices: AbstractLattice, Embedding, Hilbert, Lattice, Neighbors, OneOrMore, OperatorGenerator, OperatorSet, QuantumOperator, Term, bonds, isintracell, kind, minimumlengths, nneighbor, rank, rcoordinate, scalartype, valtype
 using QuantumClusterTheories: Periodization, Perturbation, QCT, operators, qcttimer, quadratic
-using TightBindingApproximation: TBAKind
+using TightBindingApproximation: TBA, TBAKind
 using TimerOutputs: TimerOutput
 import QuantumClusterTheories: CPT, ImpuritySolver, VCA, Ω
 import QuantumLattices: Parameters, contenttocache, contenttoconfig, qlcsave, qlload, stamp, update!
@@ -106,44 +106,83 @@ Return the grand potential of the exact diagonalization solver.
 
 """
     ImpuritySolver(
+        ed::ED, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod=BandLanczosMethod();
+        timer::TimerOutput=qcttimer
+    ) -> EDSolver
+    ImpuritySolver(
+        lattice::AbstractLattice, system::OperatorGenerator, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(system);
+        timer::TimerOutput=qcttimer
+    ) -> EDSolver
+    ImpuritySolver(
         lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
         neighbors::Union{Int, Neighbors}=nneighbor(terms), timer::TimerOutput=qcttimer
     ) -> EDSolver
 
-Construct an exact diagonalization based impurity solver from a lattice, hilbert space, terms, and quantum numbers.
+Construct an exact diagonalization based impurity solver from:
+1) a pre-built `ED` and a list of operators;
+2) a pre-built `OperatorGenerator`;
+3) a lattice, Hilbert space, terms, and quantum numbers.
 """
-function ImpuritySolver(
+@inline function ImpuritySolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod=BandLanczosMethod(); timer::TimerOutput=qcttimer)
+    return EDSolver(ed, operators, method; timer)
+end
+@inline function ImpuritySolver(
+    lattice::AbstractLattice, system::OperatorGenerator, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(system);
+    timer::TimerOutput=qcttimer
+)
+    ed = ED(lattice, system, quantumnumbers, dtype)
+    ops = operators(TBAKind(typeof(quadratic(system.terms)), valtype(system.hilbert)), lattice, system.hilbert)
+    return ImpuritySolver(ed, ops, method; timer)
+end
+@inline function ImpuritySolver(
     lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
     neighbors::Union{Int, Neighbors}=nneighbor(terms), timer::TimerOutput=qcttimer
 )
-    system = Generator(filter!(isintracell, bonds(lattice, neighbors)), hilbert, normalize(terms); half=false)
-    edkind = EDKind(hilbert)
-    table = Table(hilbert, Metric(edkind, hilbert))
-    sectors = broadcast(Sector, OneOrMore(quantumnumbers), hilbert; table)
-    matrixization = EDMatrixization{dtype}(table, sectors...)
-    ed = ED{typeof(edkind)}(lattice, system, matrixization)
-    ops = operators(TBAKind(typeof(quadratic(terms)), valtype(hilbert)), lattice, hilbert)
-    return EDSolver(ed, ops, method; timer)
+    system = OperatorGenerator(filter!(isintracell, bonds(lattice, neighbors)), hilbert, normalize(terms))
+    return ImpuritySolver(lattice, system, quantumnumbers, method, dtype; timer)
 end
 
 """
     CPT(
-        unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
+        unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
+        method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
         neighbors::Union{Int, Neighbors}=nneighbor(terms), timer::TimerOutput=qcttimer
     ) -> CPT
 
 Construct a cluster perturbation theory (CPT) frontend using exact diagonalization as the impurity solver.
 """
 function CPT(
-    unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian}, method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
+    unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
+    method=BandLanczosMethod(), dtype::Type{<:Number}=valtype(terms);
     neighbors::Union{Int, Neighbors}=nneighbor(terms), timer::TimerOutput=qcttimer
 )
     solver = ImpuritySolver(lattice, hilbert, terms, quantumnumbers, method, dtype; neighbors, timer)
     pert = Perturbation(lattice, hilbert, terms; neighbors)
-    tbakind = kind(pert)
-    opsₗ = operators(tbakind, lattice, hilbert)
-    opsᵤ = operators(tbakind, unitcell, hilbert)
-    periodization = Periodization(opsₗ, opsᵤ, unitcell.vectors)
+    periodization = Periodization(solver.operators, operators(kind(pert), unitcell, hilbert), unitcell.vectors)
+    return QCT(unitcell, lattice, solver, pert, periodization)
+end
+
+"""
+    CPT(
+        unitcell::AbstractLattice, ops_unitcell::OperatorSet, lattice::AbstractLattice, hilbert::Hilbert, interactions::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
+        method=BandLanczosMethod(), dtype::Type{<:Number}=scalartype(ops_unitcell);
+        timer::TimerOutput=qcttimer
+    ) -> CPT
+
+Construct a CPT frontend from pre-computed unitcell operators and interaction terms.
+
+Here, `operators` are rank-2 operators on the unitcell (e.g., from Wannier90) while `interactions` are rank-4 terms (e.g., `Hubbard`).
+"""
+function CPT(
+    unitcell::AbstractLattice, ops_unitcell::OperatorSet, lattice::AbstractLattice, hilbert::Hilbert, interactions::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
+    method=BandLanczosMethod(), dtype::Type{<:Number}=scalartype(ops_unitcell);
+    timer::TimerOutput=qcttimer
+)
+    @assert all(==(4), map(rank, OneOrMore(interactions))) "CPT error: interactions must be rank-4 terms."
+    intraoperators, interoperators, intrabonds, interbonds = embed(unitcell, ops_unitcell, lattice)
+    solver = ImpuritySolver(lattice, OperatorGenerator(intraoperators, intrabonds, hilbert, interactions), quantumnumbers, method, dtype; timer)
+    pert = Perturbation(TBA(lattice, OperatorGenerator(interoperators, interbonds, hilbert, ())))
+    periodization = Periodization(solver.operators, operators(kind(pert), unitcell, hilbert), unitcell.vectors)
     return QCT(unitcell, lattice, solver, pert, periodization)
 end
 
@@ -161,13 +200,62 @@ function VCA(
     method=BandLanczosMethod(), dtype::Type{<:Number}=promote_type(valtype(terms), valtype(weiss));
     neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss)), timer::TimerOutput=qcttimer
 )
+    @assert all(==(2), map(rank, OneOrMore(weiss))) "VCA error: weiss must be rank-2 terms."
     solver = ImpuritySolver(lattice, hilbert, (OneOrMore(terms)..., OneOrMore(weiss)...), quantumnumbers, method, dtype; neighbors, timer)
     pert = Perturbation(lattice, hilbert, terms, weiss; neighbors)
-    tbakind = kind(pert)
-    opsₗ = operators(tbakind, lattice, hilbert)
-    opsᵤ = operators(tbakind, unitcell, hilbert)
-    periodization = Periodization(opsₗ, opsᵤ, unitcell.vectors)
+    periodization = Periodization(solver.operators, operators(kind(pert), unitcell, hilbert), unitcell.vectors)
     return QCT(unitcell, lattice, solver, pert, periodization)
+end
+
+"""
+    VCA(
+        unitcell::AbstractLattice, ops_unitcell::OperatorSet, lattice::AbstractLattice, hilbert::Hilbert, interactions::OneOrMore{Term}, weiss::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
+        method=BandLanczosMethod(), dtype::Type{<:Number}=promote_type(scalartype(eltype(ops_unitcell)), valtype(weiss));
+        timer::TimerOutput=qcttimer
+    ) -> VCA
+
+Construct a VCA frontend from pre-computed unitcell operators, interaction terms, and Weiss field terms.
+
+Here, `operators` are rank-2 operators on the unitcell while `interactions` and `weiss` are standard `Term`s.
+"""
+function VCA(
+    unitcell::AbstractLattice, ops_unitcell::OperatorSet,
+    lattice::AbstractLattice, hilbert::Hilbert,
+    interactions::OneOrMore{Term}, weiss::OneOrMore{Term},
+    quantumnumbers::OneOrMore{Abelian},
+    method=BandLanczosMethod(), dtype::Type{<:Number}=promote_type(scalartype(eltype(ops_unitcell)), valtype(weiss));
+    timer::TimerOutput=qcttimer
+)
+    @assert all(==(4), map(rank, OneOrMore(interactions))) "VCA error: interactions must be rank-4 terms."
+    @assert all(==(2), map(rank, OneOrMore(weiss))) "VCA error: weiss must be rank-2 terms."
+    intraoperators, interoperators, intrabonds, interbonds = embed(unitcell, ops_unitcell, lattice)
+    solver = ImpuritySolver(lattice, OperatorGenerator(intraoperators, intrabonds, hilbert, (OneOrMore(interactions)..., OneOrMore(weiss)...)), quantumnumbers, method, dtype; timer)
+    tba_weiss = TBA(lattice, OperatorGenerator(intrabonds, hilbert, weiss))
+    tba_inter = TBA{typeof(kind(tba_weiss))}(lattice, OperatorGenerator(interoperators, interbonds, hilbert, ()))
+    pert = Perturbation(tba_inter, tba_weiss)
+    periodization = Periodization(solver.operators, operators(kind(pert), unitcell, hilbert), unitcell.vectors)
+    return QCT(unitcell, lattice, solver, pert, periodization)
+end
+
+"""
+    embed(unitcell::AbstractLattice, ops_unitcell::OperatorSet, lattice::AbstractLattice)
+
+Embed unitcell operators onto the lattice, returning intracluster and intercluster operator sets along with their respective bond subsets.
+
+Returns `(intraoperators, interoperators, intrabonds, interbonds)`.
+"""
+function embed(unitcell::AbstractLattice, ops_unitcell::OperatorSet, lattice::AbstractLattice)
+    len = maximum(op->norm(rcoordinate(op)), ops_unitcell)
+    lengths = minimumlengths(unitcell.coordinates, unitcell.vectors, 1)
+    while lengths[end] <= len
+        lengths = minimumlengths(unitcell.coordinates, unitcell.vectors, length(lengths))
+    end
+    allbonds = bonds(lattice, Neighbors(lengths))
+    interbonds = filter(!isintracell, allbonds)
+    intrabonds = filter(isintracell, allbonds)
+    intraoperators = Embedding(unitcell, intrabonds, lengths)(ops_unitcell)
+    interoperators = Embedding(unitcell, interbonds, lengths)(ops_unitcell)
+    return intraoperators, interoperators, intrabonds, interbonds
 end
 
 """

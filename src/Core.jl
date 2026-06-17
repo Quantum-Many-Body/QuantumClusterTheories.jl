@@ -1,3 +1,15 @@
+using LinearAlgebra: I, det, dot, tr
+using TimerOutputs: TimerOutput
+using Optim: LBFGS, Options, optimize
+using QuadGK: quadgk
+using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, BrillouinZone, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
+using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubordinate, matrix, nneighbor, rank, rcoordinate, reciprocals, rtol
+using StaticArrays: SVector
+using TightBindingApproximation: TBA, TBAKind
+
+import QuantumLattices: Parameters, kind, options, run!, update!
+import TightBindingApproximation.Fitting: optimize!
+
 """
     const qcttimer
 
@@ -66,21 +78,18 @@ end
 @inline (perturbation::CPTPerturbation)(k::Union{AbstractVector{<:Number}, Nothing}=nothing) = matrix(perturbation.intercluster, k)
 
 """
+    Perturbation(intercluster::TBA) -> CPTPerturbation
     Perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms)) -> CPTPerturbation
     Perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}) -> CPTPerturbation
 
-Construct a CPT perturbation from lattice or bonds, hilbert space and terms.
+Construct a CPT perturbation from a pre-built `TBA`, or from a lattice/hilbert/terms, or from bonds/hilbert/terms.
 """
+@inline Perturbation(intercluster::TBA) = CPTPerturbation(intercluster)
 @inline function Perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms))
     return Perturbation(filter!(!isintracell, bonds(lattice, neighbors)), hilbert, terms)
 end
 function Perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term})
-    terms = quadratic(OneOrMore(terms))
-    kind = TBAKind(typeof(terms), valtype(hilbert))
-    H = Generator(bonds, hilbert, terms; half=false)
-    quadraticization = Quadraticization{typeof(kind)}(Table(hilbert, Metric(kind, hilbert)))
-    commt = commutator(kind, hilbert)
-    return CPTPerturbation(TBA{typeof(kind)}(H, quadraticization, commt))
+    return CPTPerturbation(TBA(Generator(bonds, hilbert, quadratic(OneOrMore(terms)); half=false)))
 end
 
 """
@@ -91,6 +100,10 @@ VCA (Variational Cluster Approach) perturbation containing both intercluster qua
 struct VCAPerturbation{V<:TBA, W<:TBA} <: Perturbation
     intercluster::V
     weiss::W
+    function VCAPerturbation(intercluster::TBA, weiss::TBA)
+        @assert kind(intercluster)==kind(weiss) "VCAPerturbation error: mismatched TBAKind for intercluster and weiss subsystem."
+        new{typeof(intercluster), typeof(weiss)}(intercluster, weiss)
+    end
 end
 @inline kind(::Type{<:VCAPerturbation{V}}) where {V<:TBA} = kind(V)
 @inline function update!(perturbation::VCAPerturbation; parameters...)
@@ -103,6 +116,7 @@ end
 end
 
 """
+    Perturbation(intercluster::TBA, weiss::TBA) -> VCAPerturbation
     Perturbation(
         lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term};
         neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss))
@@ -111,8 +125,9 @@ end
         bonds₁::AbstractVector{<:Bond}, bonds₂::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term}
     ) -> VCAPerturbation
 
-Construct a VCA perturbation from lattice, hilbert space, terms, and Weiss field terms.
+Construct a VCA perturbation from pre-built `TBA` objects, or from lattice/hilbert/terms/weiss terms, or from separated bonds.
 """
+@inline Perturbation(intercluster::TBA, weiss::TBA) = VCAPerturbation(intercluster, weiss)
 @inline function Perturbation(
     lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term};
     neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss))
@@ -130,9 +145,7 @@ function Perturbation(bonds₁::AbstractVector{<:Bond}, bonds₂::AbstractVector
     kind = TBAKind(typeof((terms..., weiss...)), valtype(hilbert))
     H = Generator(bonds₁, hilbert, terms; half=false)
     W = Generator(bonds₂, hilbert, weiss; half=false)
-    quadraticization = Quadraticization{typeof(kind)}(Table(hilbert, Metric(kind, hilbert)))
-    commt = commutator(kind, hilbert)
-    return VCAPerturbation(TBA{typeof(kind)}(H, quadraticization, commt), TBA{typeof(kind)}(W, quadraticization, commt))
+    return VCAPerturbation(TBA{typeof(kind)}(H), TBA{typeof(kind)}(W))
 end
 
 """
