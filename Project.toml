@@ -1,6 +1,6 @@
 name = "QuantumClusterTheories"
 uuid = "097857cb-d914-4df9-ba6d-e02fb595fe10"
-version = "0.1.4"
+version = "0.1.5"
 authors = ["waltergu <waltergu1989@gmail.com> and contributors"]
 
 [deps]
@@ -19,11 +19,11 @@ ExactDiagonalization = "52dcaa32-6da7-11e9-20ef-755843cf72eb"
 QuantumClusterTheoriesExactDiagonalizationExt = ["ExactDiagonalization"]
 
 [compat]
-ExactDiagonalization = "0.3.6"
+ExactDiagonalization = "0.3.7"
 LinearAlgebra = "1.10 - 1"
 Optim = "1.7 - 2"
 QuadGK = "2.11 - 2"
-QuantumLattices = "0.15.3"
+QuantumLattices = "0.15.4"
 StaticArrays = "1.4 - 1"
 TightBindingApproximation = "0.3.9"
 TimerOutputs = "0.5"

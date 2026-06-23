@@ -64,7 +64,7 @@ haldane = Algorithm(
 
 # Energy range and Brillouin zone path
 es = LinRange(-4.0, 4.0, 201)
-path = ReciprocalPath(reciprocals(unitcell), hexagon"Γ-K-M-Γ"; length=100);
+path = ReciprocalPath(unitcell, hexagon"Γ-K-M-Γ"; length=100);
 nothing  # hide
 ```
 
@@ -91,7 +91,7 @@ haldane_edge = Algorithm(
 );
 
 # Path along the edge direction
-path_edge = ReciprocalPath(reciprocals(edge), -0.5=>0.5; length=100);
+path_edge = ReciprocalPath(edge, -0.5=>0.5; length=100);
 nothing  # hide
 ```
 

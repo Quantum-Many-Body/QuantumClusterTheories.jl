@@ -10,6 +10,7 @@ Here are some examples to illustrate how this package could be used.
 Pages = [
         "SquareHubbard.md",
         "HaldaneHubbard.md",
+        "La₃Ni₂O₇.md",
         ]
 Depth = 2
 ```

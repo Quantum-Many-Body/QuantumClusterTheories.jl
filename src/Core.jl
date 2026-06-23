@@ -2,8 +2,8 @@ using LinearAlgebra: I, det, dot, tr
 using TimerOutputs: TimerOutput
 using Optim: LBFGS, Options, optimize
 using QuadGK: quadgk
-using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, BrillouinZone, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneAtLeast, OneOrMore, ReciprocalSpace, Table, Term
-using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubordinate, matrix, nneighbor, rank, rcoordinate, reciprocals, rtol
+using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, BrillouinZone, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneOrMore, ReciprocalSpace, Table, Term, ZeroAtLeast
+using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubordinate, matrix, nneighbor, rank, rcoordinate, rtol
 using StaticArrays: SVector
 using TightBindingApproximation: TBA, TBAKind
 
@@ -34,11 +34,11 @@ function operators(tbakind::TBAKind{:BdG}, lattice::AbstractLattice, hilbert::Hi
 end
 
 """
-    quadratic(terms::OneAtLeast{Term}) -> Tuple
+    quadratic(terms::ZeroAtLeast{Term}) -> Tuple
 
 Extract the quadratic (rank-2) terms from a collection of terms.
 """
-@generated quadratic(terms::OneAtLeast{Term}) = Expr(:tuple, [:(terms[$i]) for (i, T) in enumerate(fieldtypes(terms)) if rank(T)==2]...)
+@generated quadratic(terms::ZeroAtLeast{Term}) = Expr(:tuple, [:(terms[$i]) for (i, T) in enumerate(fieldtypes(terms)) if rank(T)==2]...)
 
 """
     ImpuritySolver <: Frontend
@@ -257,7 +257,7 @@ end
     Ω(qct::Algorithm{<:QCT}; kwargs...) -> Float64
     Ω(
         qct::QCT;
-        brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
+        brillouinzone::BrillouinZone=BrillouinZone(qct.lattice, 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
     ) -> Float64
 
 Compute the grand potential per unit cell of the quantum cluster theory system.
@@ -265,7 +265,7 @@ Compute the grand potential per unit cell of the quantum cluster theory system.
 For `Algorithm{<:VCA}`, this delegates to the second method.
 """
 @inline Ω(qct::Algorithm{<:QCT}; kwargs...) = Ω(qct.frontend; kwargs...)
-function Ω(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6)
+function Ω(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(qct.lattice, 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6)
     Vs = [qct.perturbation(k) for k in brillouinzone]
     function f(ω::Real)
         result = 0.0
@@ -287,7 +287,7 @@ end
     expectation(qct::Algorithm{<:QCT}, m::Union{AbstractMatrix{<:Number}, Function, Symbol}; kwargs...) -> Float64
     expectation(
         qct::QCT, m::Union{AbstractMatrix{<:Number}, Function, Symbol};
-        brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, p::Real=1.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
+        brillouinzone::BrillouinZone=BrillouinZone(qct.lattice, 100), μ::Real=0.0, p::Real=1.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
     ) -> Float64
 
 Compute the expectation value of an operator `m` (matrix, or function of `k`, or the symbol specifies the Weiss term in VCA) over the quantum cluster theory system by integrating over the Brillouin zone and frequency.
@@ -303,7 +303,7 @@ function expectation(qct::VCA, m::Symbol; kwargs...)
 end
 function expectation(
     qct::QCT, m::Union{AbstractMatrix{<:Number}, Function};
-    brillouinzone::BrillouinZone=BrillouinZone(reciprocals(qct.lattice), 100), μ::Real=0.0, p::Real=1.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
+    brillouinzone::BrillouinZone=BrillouinZone(qct.lattice, 100), μ::Real=0.0, p::Real=1.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
 )
     Vs = [qct.perturbation(k) for k in brillouinzone]
     Ss = [_matrix_(m, k) for k in brillouinzone]
@@ -327,7 +327,7 @@ end
     optimize!(
         vca::VCA;
         verbose=false, method=LBFGS(), options=Options(x_abstol=1e-4, x_reltol=1e-4, f_abstol=2e-6, f_reltol=2e-6),
-        Ω_options=(brillouinzone=BrillouinZone(reciprocals(vca.lattice), 100), μ=0.0, atol=1e-6, rtol=1e-6, maxevals=10^6)
+        Ω_options=(brillouinzone=BrillouinZone(vca.lattice, 100), μ=0.0, atol=1e-6, rtol=1e-6, maxevals=10^6)
     )
 
 Optimize the variational cluster approximation to find the stationary point of the grand potential.
@@ -339,7 +339,7 @@ For `VCA`, the parameters are optimized using the specified method.
 function optimize!(
     vca::VCA;
     verbose=false, method=LBFGS(), options=Options(x_abstol=1e-4, x_reltol=1e-4, f_abstol=2e-6, f_reltol=2e-6),
-    Ω_options=(brillouinzone=BrillouinZone(reciprocals(vca.lattice), 100), μ=0.0, atol=1e-6, rtol=1e-6, maxevals=10^6)
+    Ω_options=(brillouinzone=BrillouinZone(vca.lattice, 100), μ=0.0, atol=1e-6, rtol=1e-6, maxevals=10^6)
     )
     params = Parameters(vca.perturbation.weiss)
     function f(v::Vector{<:Number})

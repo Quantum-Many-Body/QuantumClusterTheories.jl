@@ -2,7 +2,7 @@ module QuantumClusterTheoriesExactDiagonalizationExt
 
 using ExactDiagonalization: Abelian, BandLanczosMethod, ED, GreenFunctionMethod, RetardedGreenFunction, normalize
 using LinearAlgebra: eigen, norm
-using QuantumLattices: AbstractLattice, Embedding, Hilbert, Lattice, Neighbors, OneOrMore, OperatorGenerator, OperatorSet, QuantumOperator, Term, bonds, isintracell, kind, minimumlengths, nneighbor, rank, rcoordinate, scalartype, valtype
+using QuantumLattices: AbstractLattice, Embedding, Hilbert, Lattice, Neighbors, OneOrMore, ZeroOrMore, OperatorGenerator, OperatorSet, QuantumOperator, Term, bonds, isintracell, kind, minimumlengths, nneighbor, rank, rcoordinate, scalartype, valtype
 using QuantumClusterTheories: Periodization, Perturbation, QCT, operators, qcttimer, quadratic
 using TightBindingApproximation: TBA, TBAKind
 using TimerOutputs: TimerOutput
@@ -164,7 +164,7 @@ end
 
 """
     CPT(
-        unitcell::AbstractLattice, ops_unitcell::OperatorSet, lattice::AbstractLattice, hilbert::Hilbert, interactions::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
+        unitcell::AbstractLattice, ops_unitcell::OperatorSet, lattice::AbstractLattice, hilbert::Hilbert, interactions::ZeroOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
         method=BandLanczosMethod(), dtype::Type{<:Number}=scalartype(ops_unitcell);
         timer::TimerOutput=qcttimer
     ) -> CPT
@@ -174,11 +174,11 @@ Construct a CPT frontend from pre-computed unitcell operators and interaction te
 Here, `operators` are rank-2 operators on the unitcell (e.g., from Wannier90) while `interactions` are rank-4 terms (e.g., `Hubbard`).
 """
 function CPT(
-    unitcell::AbstractLattice, ops_unitcell::OperatorSet, lattice::AbstractLattice, hilbert::Hilbert, interactions::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
+    unitcell::AbstractLattice, ops_unitcell::OperatorSet, lattice::AbstractLattice, hilbert::Hilbert, interactions::ZeroOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
     method=BandLanczosMethod(), dtype::Type{<:Number}=scalartype(ops_unitcell);
     timer::TimerOutput=qcttimer
 )
-    @assert all(==(4), map(rank, OneOrMore(interactions))) "CPT error: interactions must be rank-4 terms."
+    @assert all(==(4), map(rank, ZeroOrMore(interactions))) "CPT error: interactions must be rank-4 terms."
     intraoperators, interoperators, intrabonds, interbonds = embed(unitcell, ops_unitcell, lattice)
     solver = ImpuritySolver(lattice, OperatorGenerator(intraoperators, intrabonds, hilbert, interactions), quantumnumbers, method, dtype; timer)
     pert = Perturbation(TBA(lattice, OperatorGenerator(interoperators, interbonds, hilbert, ())))
@@ -209,7 +209,7 @@ end
 
 """
     VCA(
-        unitcell::AbstractLattice, ops_unitcell::OperatorSet, lattice::AbstractLattice, hilbert::Hilbert, interactions::OneOrMore{Term}, weiss::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
+        unitcell::AbstractLattice, ops_unitcell::OperatorSet, lattice::AbstractLattice, hilbert::Hilbert, interactions::ZeroOrMore{Term}, weiss::OneOrMore{Term}, quantumnumbers::OneOrMore{Abelian},
         method=BandLanczosMethod(), dtype::Type{<:Number}=promote_type(scalartype(eltype(ops_unitcell)), valtype(weiss));
         timer::TimerOutput=qcttimer
     ) -> VCA
@@ -221,15 +221,15 @@ Here, `operators` are rank-2 operators on the unitcell while `interactions` and 
 function VCA(
     unitcell::AbstractLattice, ops_unitcell::OperatorSet,
     lattice::AbstractLattice, hilbert::Hilbert,
-    interactions::OneOrMore{Term}, weiss::OneOrMore{Term},
+    interactions::ZeroOrMore{Term}, weiss::OneOrMore{Term},
     quantumnumbers::OneOrMore{Abelian},
     method=BandLanczosMethod(), dtype::Type{<:Number}=promote_type(scalartype(eltype(ops_unitcell)), valtype(weiss));
     timer::TimerOutput=qcttimer
 )
-    @assert all(==(4), map(rank, OneOrMore(interactions))) "VCA error: interactions must be rank-4 terms."
+    @assert all(==(4), map(rank, ZeroOrMore(interactions))) "VCA error: interactions must be rank-4 terms."
     @assert all(==(2), map(rank, OneOrMore(weiss))) "VCA error: weiss must be rank-2 terms."
     intraoperators, interoperators, intrabonds, interbonds = embed(unitcell, ops_unitcell, lattice)
-    solver = ImpuritySolver(lattice, OperatorGenerator(intraoperators, intrabonds, hilbert, (OneOrMore(interactions)..., OneOrMore(weiss)...)), quantumnumbers, method, dtype; timer)
+    solver = ImpuritySolver(lattice, OperatorGenerator(intraoperators, intrabonds, hilbert, (ZeroOrMore(interactions)..., OneOrMore(weiss)...)), quantumnumbers, method, dtype; timer)
     tba_weiss = TBA(lattice, OperatorGenerator(intrabonds, hilbert, weiss))
     tba_inter = TBA{typeof(kind(tba_weiss))}(lattice, OperatorGenerator(interoperators, interbonds, hilbert, ()))
     pert = Perturbation(tba_inter, tba_weiss)
@@ -245,16 +245,18 @@ Embed unitcell operators onto the lattice, returning intracluster and interclust
 Returns `(intraoperators, interoperators, intrabonds, interbonds)`.
 """
 function embed(unitcell::AbstractLattice, ops_unitcell::OperatorSet, lattice::AbstractLattice)
-    len = maximum(op->norm(rcoordinate(op)), ops_unitcell)
-    lengths = minimumlengths(unitcell.coordinates, unitcell.vectors, 1)
+    initial = sort!(unique!(map(op->round(norm(rcoordinate(op)); digits=14), ops_unitcell)))
+    len = maximum(initial)
+    lengths = minimumlengths(unitcell, length(initial)-1)
     while lengths[end] <= len
-        lengths = minimumlengths(unitcell.coordinates, unitcell.vectors, length(lengths))
+        lengths = minimumlengths(unitcell, length(lengths))
     end
-    allbonds = bonds(lattice, Neighbors(lengths))
+    neighbors = Neighbors(lengths)
+    allbonds = bonds(lattice, neighbors)
     interbonds = filter(!isintracell, allbonds)
     intrabonds = filter(isintracell, allbonds)
-    intraoperators = Embedding(unitcell, intrabonds, lengths)(ops_unitcell)
-    interoperators = Embedding(unitcell, interbonds, lengths)(ops_unitcell)
+    intraoperators = Embedding(unitcell, intrabonds, neighbors)(ops_unitcell)
+    interoperators = Embedding(unitcell, interbonds, neighbors)(ops_unitcell)
     return intraoperators, interoperators, intrabonds, interbonds
 end
 

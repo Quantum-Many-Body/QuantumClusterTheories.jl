@@ -40,7 +40,7 @@ cpt = Algorithm(:SquareHubbard, CPT(unitcell, lattice, hilbert, (t, μ, U), quan
 
 # define the energy range and the momentum path
 es = LinRange(-10.0, 10.0, 501)
-path = ReciprocalPath(reciprocals(unitcell), rectangle"Γ-X-M-Γ"; length=100)
+path = ReciprocalPath(unitcell, rectangle"Γ-X-M-Γ"; length=100)
 
 # compute the spectral function along the path
 spectra = cpt(:EB, DynamicalSpectra(path, es); η=0.1)

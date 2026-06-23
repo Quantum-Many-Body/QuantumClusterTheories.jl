@@ -75,7 +75,7 @@ end
     @test isapprox(Ω(cpt), -4.4444120; atol=1e-6)
 
     es = LinRange(-10.0, 10.0, 501)
-    path = ReciprocalPath(reciprocals(unitcell), rectangle"Γ-X-M-Γ"; length=100)
+    path = ReciprocalPath(unitcell, rectangle"Γ-X-M-Γ"; length=100)
     spectra = cpt(:EB, DynamicalSpectra(path, es); η=0.1)
     Plots.savefig(Plots.plot(spectra), "Plots-Hubbard-Square-2x2-spectral.png")
     Makie.save("Makie-Hubbard-Square-2x2-spectral.png", Makie.plot(spectra))
@@ -129,7 +129,7 @@ end
     )
 
     es = LinRange(-4.0, 4.0, 201)
-    path = ReciprocalPath(reciprocals(unitcell), hexagon"Γ-K-M-Γ"; length=100)
+    path = ReciprocalPath(unitcell, hexagon"Γ-K-M-Γ"; length=100)
     update!(haldane; U=4.0)
     spectra = haldane(:EB, DynamicalSpectra(path, es); η=0.04)
     Plots.savefig(Plots.plot(spectra), "Plots-Haldane-Hubbard-Topological.png")
@@ -160,7 +160,7 @@ end
     ω = rand(ComplexF64)
     @test invoke(inv, Tuple{ImpuritySolver, Number}, haldane_edge.frontend.solver, ω) ≈ inv(haldane_edge.frontend.solver, ω)
     @test isapprox(Ω(haldane_edge.frontend.solver), -125.3539916; atol=1e-6)
-    path_edge = ReciprocalPath(reciprocals(edge), -0.5=>0.5; length=100)
+    path_edge = ReciprocalPath(edge, -0.5=>0.5; length=100)
     spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04)
     Plots.savefig(Plots.plot(spectra_edge), "Plots-Haldane-Hubbard-Edge-Topological.png")
     Makie.save("Makie-Haldane-Hubbard-Edge-Topological.png", Makie.plot(spectra_edge))

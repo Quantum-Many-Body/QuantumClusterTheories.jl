@@ -22,6 +22,7 @@ makedocs(;
             "examples/Introduction.md",
             "examples/SquareHubbard.md",
             "examples/HaldaneHubbard.md",
+            "examples/La₃Ni₂O₇.md",
         ]
     ],
 )

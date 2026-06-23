@@ -1,0 +1,6 @@
+[La3Ni2O7Data]
+git-tree-sha1 = "e3e32740c6b77f107dee58e869c40cf50ac3944e"
+
+    [[La3Ni2O7Data.download]]
+    sha256 = "5bfaf4bfd2c6dd2220787a3113e6e83f0dda0d4516b5bfe9472c5eaf5007d75e"
+    url = "https://gist.githubusercontent.com/waltergu/d422a0f931bc961cae66f15a3f69738b/raw/a594829d7d90c3fa08a19549e2e40e3b8ec9d7d8/La%E2%82%83Ni%E2%82%82O%E2%82%87-wannier90.tar.gz"
