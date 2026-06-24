@@ -10,7 +10,16 @@ The Wannier90 data used here is for the bilayer nickelate La₃Ni₂O₇, taken 
 
 ## Band Structure from Wannier90
 
-First, we obtain the Wannier90 data through Julia's artifact system and read the lattice together with the real-space Hamiltonian:
+First, we obtain the Wannier90 data through Julia's artifact system and read the lattice together with the real-space Hamiltonian. The dataset is registered as a Julia artifact — place the following `Artifacts.toml` alongside your script:
+
+```toml
+[La3Ni2O7Data]
+git-tree-sha1 = "e3e32740c6b77f107dee58e869c40cf50ac3944e"
+
+    [[La3Ni2O7Data.download]]
+    sha256 = "5bfaf4bfd2c6dd2220787a3113e6e83f0dda0d4516b5bfe9472c5eaf5007d75e"
+    url = "https://gist.githubusercontent.com/waltergu/d422a0f931bc961cae66f15a3f69738b/raw/a594829d7d90c3fa08a19549e2e40e3b8ec9d7d8/La%E2%82%83Ni%E2%82%82O%E2%82%87-wannier90.tar.gz"
+```
 
 ```@example la3ni2o7
 using Artifacts
@@ -37,7 +46,7 @@ The function `readlattice` parses the `wannier90.win` input file to extract the 
 # Read the lattice from the Wannier90 input file
 unitcell = readlattice(dir, seedname)
 
-# The Wannier90 Hamiltonian describes 4 Wannier orbitals (2 Ni × 2 orbitals each) without spin
+# The Wannier90 Hamiltonian describes 4 Wannier states (2 Ni × 2 orbitals each) without spin
 hilbert = Hilbert(Fock{:f}(2, 1), length(unitcell))
 
 # Construct the W90 tight-binding system
@@ -77,9 +86,12 @@ With the tight-binding model in hand, we can now build a CPT calculation. CPT pa
 
 Note that the operator-based CPT constructor — used here to interface with Wannier90 — only requires the operators defined on the **unitcell** (extracted from the TBA model via `expand(tba.frontend.system)`). CPT automatically expands (embeds) these unitcell operators onto the specified cluster lattice and separates them into intra-cluster and inter-cluster contributions, so there is no need to manually construct the cluster-level Hamiltonian.
 
-We now set up a 2×2 cluster of the La₃Ni₂O₇ unit cell:
+We now assemble the full CPT framework: the unitcell operators (extracted from the TBA model), a 2×2 supercell lattice, the spinful Hilbert space, the Kanamori interaction terms, and the quantum number constraint. La₃Ni₂O₇ is at 3/8 filling — the 2×2 supercell contains 4 primitive unit cells, each with 4 Wannier orbitals × 2 spins = 8 states, giving 32 states total, which corresponds to 32 × 3/8 = 12 electrons. Here we use only 2 electrons for illustration to keep exact diagonalization lightweight:
 
 ```@example la3ni2o7
+# Extract unitcell operators from the TBA model
+unitcell_ops = expand(tba.frontend.system)
+
 # Build a 2×2 cluster lattice (periodic in-plane, open along c)
 unitcell_cpt = Lattice(wan.frontend.lattice, (1, 1, 1), ("P", "P", "O"))
 lattice = Lattice(wan.frontend.lattice, (2, 2, 1), ("P", "P", "O"))
@@ -87,23 +99,26 @@ lattice = Lattice(wan.frontend.lattice, (2, 2, 1), ("P", "P", "O"))
 # Spinful Hilbert space for the cluster
 hilbert_cpt = Hilbert(Fock{:f}(2, 2), length(lattice))
 
-# Add a Hubbard interaction (U=0 for illustration; use a finite value for real calculations)
-U = Hubbard(:U, 0.0)
+# Add Kanamori interactions (all set to 0 for illustration)
+# U: intra-orbital Hubbard, U′/U″: inter-orbital (inter/intra spin)
+# J/J′: Hund's coupling (spin-flip/pair-hopping)
+U  = Hubbard(:U, 0.0)
+U′ = InterOrbitalInterSpin(:U′, 0.0)
+U″ = InterOrbitalIntraSpin(:U″, 0.0)
+J  = SpinFlip(:J, 0.0)
+J′ = PairHopping(:J′, 0.0)
 
-# La₃Ni₂O₇ is at 3/8 filling; the 2×2 cluster has 4 unit cells,
-# each with 4 Wannier orbitals × 2 spins = 8 states, giving 32 states total.
-# The physical filling is 32 × 3/8 = 12 electrons. Here we use only 2 electrons
-# for illustration purposes to keep exact diagonalization lightweight.
+# Use 2 electrons with total Sz = 0 as quantum number constraint
 quantumnumber = ℕ(2) ⊠ 𝕊ᶻ(0)
 
 cpt = Algorithm(
     :La₃Ni₂O₇,
-    CPT(unitcell_cpt, expand(tba.frontend.system), lattice, hilbert_cpt, (U,), quantumnumber)
+    CPT(unitcell_cpt, unitcell_ops, lattice, hilbert_cpt, (U, U′, U″, J, J′), quantumnumber)
 )
 nothing # hide
 ```
 
-Finally, we compute the single-particle spectral function along the high-symmetry path.
+Finally, we compute the single-particle spectral function along the high-symmetry path:
 
 ```@example la3ni2o7
 # Energy range for the spectral function
@@ -119,4 +134,4 @@ Plots.plot!(plt, bands_tba; ls=:dash, color=:white, lw=1, alpha=0.5)
 Plots.title!(plt, "CPT spectral function of La₃Ni₂O₇")
 ```
 
-The dashed white lines show the bare TBA band structure overlaid on the CPT spectral function. Since we used `U=0`, the CPT spectrum is essentially the non-interacting limit — in a real calculation, a finite Hubbard `U` would capture correlation effects such as band renormalization and spectral weight transfer. This workflow — from Wannier90 data to CPT spectra — forms the foundation for studying strongly correlated materials with realistic first-principles inputs.
+The dashed white lines show the bare TBA band structure overlaid on the CPT spectral function. Since all Kanamori interactions (`U`, `U′`, `U″`, `J`, `J′`) were set to `0`, the CPT spectrum is essentially the non-interacting limit — in a real calculation, finite interaction strengths would capture correlation effects such as band renormalization and spectral weight transfer. This workflow — from Wannier90 data to CPT spectra — forms the foundation for studying strongly correlated materials with realistic first-principles inputs.
