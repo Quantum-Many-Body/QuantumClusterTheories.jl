@@ -2,12 +2,12 @@ using LinearAlgebra: I, det, dot, tr
 using TimerOutputs: TimerOutput
 using Optim: LBFGS, Options, optimize
 using QuadGK: quadgk
-using QuantumLattices: AbstractLattice, Action, Algorithm, Assignment, Bond, BrillouinZone, CoordinatedIndex, Data, Fock, Frontend, Generator, Hilbert, Index, Metric, Neighbors, OneOrMore, ReciprocalSpace, Table, Term, ZeroAtLeast
+using QuantumLattices: AbstractLattice, Algorithm, Assignment, Bond, BrillouinZone, CoordinatedIndex, Data, Fock, Generator, Hilbert, Index, LatticeModel, Metric, Neighbors, OneOrMore, ReciprocalSpace, Table, Term, ZeroAtLeast
 using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubordinate, matrix, nneighbor, rank, rcoordinate, rtol
 using StaticArrays: SVector
 using TightBindingApproximation: TBA, TBAKind
 
-import QuantumLattices: Parameters, kind, options, run!, update!
+import QuantumLattices: Parameters, dependencytypes, kind, run!, update!
 import TightBindingApproximation.Fitting: optimize!
 
 """
@@ -41,12 +41,12 @@ Extract the quadratic (rank-2) terms from a collection of terms.
 @generated quadratic(terms::ZeroAtLeast{Term}) = Expr(:tuple, [:(terms[$i]) for (i, T) in enumerate(fieldtypes(terms)) if rank(T)==2]...)
 
 """
-    ImpuritySolver <: Frontend
+    ImpuritySolver <: LatticeModel
 
 Abstract type for impurity solvers used in quantum cluster theory calculations.
 Subtypes must implement the call syntax `solver(ω)` to return the solver's response function at frequency `ω`.
 """
-abstract type ImpuritySolver  <: Frontend end
+abstract type ImpuritySolver <: LatticeModel end
 @inline Base.valtype(::Type{<:ImpuritySolver}) = Matrix{ComplexF64}
 
 """
@@ -207,11 +207,11 @@ Return the number of unit cells in the cluster (i.e., the ratio of cluster size 
 @inline Base.count(periodization::Periodization) = length(periodization.coordinates)÷length(periodization.groups)
 
 """
-    QCT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:Perturbation, P<:Periodization} <: Frontend
+    QCT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:Perturbation, P<:Periodization} <: LatticeModel
 
 Quantum cluster theory frontend that combines an impurity solver, perturbation, and crystallographic periodization to compute the Green's function of a system.
 """
-struct QCT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:Perturbation, P<:Periodization} <: Frontend
+struct QCT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:Perturbation, P<:Periodization} <: LatticeModel
     unitcell::U
     lattice::L
     solver::I
@@ -309,15 +309,15 @@ function expectation(
     Ss = [_matrix_(m, k) for k in brillouinzone]
     Ts = [tr(S) for S in Ss]
     function f(ω::Real)
-        result = 0.0
+        result = Complex(0.0)
         G⁻¹ = inv(qct.solver, 1im*ω+μ)
         for (V, S, T) in zip(Vs, Ss, Ts)
-            result += real(tr(S*inv(G⁻¹-V)) - T/(1im*ω-p))
+            result += tr(S*inv(G⁻¹-V)) - T/(1im*ω-p)
         end
-        return result / length(brillouinzone) / π
+        return result / length(brillouinzone) / 2π
     end
-    result = quadgk(f, 0, Inf; atol, rtol, maxevals)[1] / length(qct.lattice)
-    return result::Float64
+    result = quadgk(f, -Inf, Inf; atol, rtol, maxevals)[1] / length(qct.lattice)
+    return result
 end
 @inline _matrix_(m::AbstractMatrix{<:Number}, ::AbstractVector{<:Number}) = m
 @inline _matrix_(m::Function, k::AbstractVector{<:Number}) = m(k)::AbstractMatrix{<:Number}
@@ -355,19 +355,20 @@ function optimize!(
 end
 
 """
-    DynamicalSpectra{R<:ReciprocalSpace} <: Action
+    DynamicalSpectra{R<:ReciprocalSpace, F<:Function}
 
 Dynamical spectra.
 """
-struct DynamicalSpectra{R<:ReciprocalSpace} <: Action
+struct DynamicalSpectra{R<:ReciprocalSpace, F<:Function}
     reciprocalspace::R
     energies::Vector{Float64}
-    DynamicalSpectra(reciprocalspace::ReciprocalSpace, energies::AbstractVector{<:Real}) = new{typeof(reciprocalspace)}(reciprocalspace, energies)
+    η::Float64
+    rescale::F
+    function DynamicalSpectra(reciprocalspace::ReciprocalSpace, energies::AbstractVector{<:Real}; η::Real=0.1, rescale::Function=identity)
+        return new{typeof(reciprocalspace), typeof(rescale)}(reciprocalspace, collect(Float64, energies), convert(Float64, η), rescale)
+    end
 end
-@inline options(::Type{<:Assignment{<:DynamicalSpectra}}) = (
-    η = "Lorentz broadening",
-    rescale = "function used to rescale the intensity of the spectrum at each energy-momentum point"
-)
+@inline dependencytypes(::Type{<:DynamicalSpectra}) = ()
 
 """
     DynamicalSpectraData{R<:ReciprocalSpace} <: Data
@@ -383,14 +384,15 @@ struct DynamicalSpectraData{R<:ReciprocalSpace} <: Data
     energies::Vector{Float64}
     values::Matrix{Float64}
 end
-function run!(qct::Algorithm{<:QCT}, ds::Assignment{<:DynamicalSpectra}; η::Real=0.1, rescale::Function=identity, options...)
-    result = zeros(length(ds.action.energies), length(ds.action.reciprocalspace))
-    Vs = [qct.frontend.perturbation(k) for k in ds.action.reciprocalspace]
-    for (i, ω) in enumerate(ds.action.energies)
+function run!(qct::Algorithm{<:QCT}, ds::Assignment{<:DynamicalSpectra})
+    η, rescale = ds.task.η, ds.task.rescale
+    result = zeros(length(ds.task.energies), length(ds.task.reciprocalspace))
+    Vs = [qct.frontend.perturbation(k) for k in ds.task.reciprocalspace]
+    for (i, ω) in enumerate(ds.task.energies)
         G⁻¹ = inv(qct.frontend.solver, ω+1im*η)
-        for (j, (k, V)) in enumerate(zip(ds.action.reciprocalspace, Vs))
+        for (j, (k, V)) in enumerate(zip(ds.task.reciprocalspace, Vs))
             result[i, j] = rescale(-imag(tr(qct.frontend.periodization(inv(G⁻¹-V), k))))
         end
     end
-    return DynamicalSpectraData(ds.action.reciprocalspace, ds.action.energies, result)
+    return DynamicalSpectraData(ds.task.reciprocalspace, ds.task.energies, result)
 end

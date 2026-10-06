@@ -1,9 +1,10 @@
 name = "QuantumClusterTheories"
 uuid = "097857cb-d914-4df9-ba6d-e02fb595fe10"
-version = "0.1.5"
+version = "0.2.0"
 authors = ["waltergu <waltergu1989@gmail.com> and contributors"]
 
 [deps]
+ExactDiagonalization = "52dcaa32-6da7-11e9-20ef-755843cf72eb"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
@@ -12,19 +13,16 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 TightBindingApproximation = "d3576f78-cb9d-4774-9dc5-b247cf392ff4"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
-[weakdeps]
-ExactDiagonalization = "52dcaa32-6da7-11e9-20ef-755843cf72eb"
-
 [extensions]
 QuantumClusterTheoriesExactDiagonalizationExt = ["ExactDiagonalization"]
 
 [compat]
-ExactDiagonalization = "0.3.7"
+ExactDiagonalization = "0.4"
 LinearAlgebra = "1.10 - 1"
 Optim = "1.7 - 2"
 QuadGK = "2.11 - 2"
-QuantumLattices = "0.15.4"
+QuantumLattices = "0.16"
 StaticArrays = "1.4 - 1"
-TightBindingApproximation = "0.3.9"
+TightBindingApproximation = "0.4"
 TimerOutputs = "0.5, 1"
-julia = "1.10 - 1.12"
+julia = "1.10 - 1.13"

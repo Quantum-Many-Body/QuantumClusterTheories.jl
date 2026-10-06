@@ -76,7 +76,7 @@ end
 
     es = LinRange(-10.0, 10.0, 501)
     path = ReciprocalPath(unitcell, rectangle"Γ-X-M-Γ"; length=100)
-    spectra = cpt(:EB, DynamicalSpectra(path, es); η=0.1)
+    spectra = cpt(:EB, DynamicalSpectra(path, es; η=0.1))
     Plots.savefig(Plots.plot(spectra), "Plots-Hubbard-Square-2x2-spectral.png")
     Makie.save("Makie-Hubbard-Square-2x2-spectral.png", Makie.plot(spectra))
 end
@@ -131,17 +131,17 @@ end
     es = LinRange(-4.0, 4.0, 201)
     path = ReciprocalPath(unitcell, hexagon"Γ-K-M-Γ"; length=100)
     update!(haldane; U=4.0)
-    spectra = haldane(:EB, DynamicalSpectra(path, es); η=0.04)
+    spectra = haldane(:EB, DynamicalSpectra(path, es; η=0.04))
     Plots.savefig(Plots.plot(spectra), "Plots-Haldane-Hubbard-Topological.png")
     Makie.save("Makie-Haldane-Hubbard-Topological.png", Makie.plot(spectra))
 
     update!(haldane; U=4.6)
-    spectra = haldane(:EB, DynamicalSpectra(path, es); η=0.04)
+    spectra = haldane(:EB, DynamicalSpectra(path, es; η=0.04))
     Plots.savefig(Plots.plot(spectra), "Plots-Haldane-Hubbard-Transition.png")
     Makie.save("Makie-Haldane-Hubbard-Transition.png", Makie.plot(spectra))
 
     update!(haldane; U=5.0)
-    spectra = haldane(:EB, DynamicalSpectra(path, es); η=0.04)
+    spectra = haldane(:EB, DynamicalSpectra(path, es; η=0.04))
     Plots.savefig(Plots.plot(spectra), "Plots-Haldane-Hubbard-Trivial.png")
     Makie.save("Makie-Haldane-Hubbard-Trivial.png", Makie.plot(spectra))
 
@@ -161,12 +161,12 @@ end
     @test invoke(inv, Tuple{ImpuritySolver, Number}, haldane_edge.frontend.solver, ω) ≈ inv(haldane_edge.frontend.solver, ω)
     @test isapprox(Ω(haldane_edge.frontend.solver), -125.3539916; atol=1e-6)
     path_edge = ReciprocalPath(edge, -0.5=>0.5; length=100)
-    spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04)
+    spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es; η=0.04))
     Plots.savefig(Plots.plot(spectra_edge), "Plots-Haldane-Hubbard-Edge-Topological.png")
     Makie.save("Makie-Haldane-Hubbard-Edge-Topological.png", Makie.plot(spectra_edge))
 
     update!(haldane_edge; U=5.0)
-    spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04)
+    spectra_edge = haldane_edge(:Edge, DynamicalSpectra(path_edge, es; η=0.04))
     Plots.savefig(Plots.plot(spectra_edge), "Plots-Haldane-Hubbard-Edge-Trivial.png")
     Makie.save("Makie-Haldane-Hubbard-Edge-Trivial.png", Makie.plot(spectra_edge))
 end

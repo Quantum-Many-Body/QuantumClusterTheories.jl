@@ -43,7 +43,7 @@ es = LinRange(-10.0, 10.0, 501)
 path = ReciprocalPath(unitcell, rectangle"Γ-X-M-Γ"; length=100)
 
 # compute the spectral function along the path
-spectra = cpt(:EB, DynamicalSpectra(path, es); η=0.1)
+spectra = cpt(:EB, DynamicalSpectra(path, es; η=0.1))
 
 # plot the spectral function
 Plots.plot(spectra)

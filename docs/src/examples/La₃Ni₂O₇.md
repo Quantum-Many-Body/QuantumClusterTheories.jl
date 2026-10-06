@@ -125,7 +125,7 @@ Finally, we compute the single-particle spectral function along the high-symmetr
 emin, emax = -1.5, 3.0
 
 # Compute dynamical spectra with a finite broadening η = 0.05 eV
-spectra = cpt(:EB, DynamicalSpectra(path, LinRange(emin, emax, 451)); η=0.05)
+spectra = cpt(:EB, DynamicalSpectra(path, LinRange(emin, emax, 451); η=0.05))
 
 # Plot the CPT spectral function with TBA bands overlaid
 plt = Plots.plot()

@@ -105,14 +105,14 @@ In the topological phase, the system has a finite bulk gap and hosts **gapless c
 ```@example haldane-hubbard-cpt
 using Logging; Logging.disable_logging(Logging.Info)  # hide
 update!(haldane; U=4.0)
-spectra_topological = haldane(:EB, DynamicalSpectra(path, es); η=0.04);
+spectra_topological = haldane(:EB, DynamicalSpectra(path, es; η=0.04));
 plot(spectra_topological, title="Bulk (U=4.0, Topological)")
 ```
 
 **Edge spectrum:**
 ```@example haldane-hubbard-cpt
 update!(haldane_edge; U=4.0)
-spectra_edge_topological = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04);
+spectra_edge_topological = haldane_edge(:Edge, DynamicalSpectra(path_edge, es; η=0.04));
 plot(spectra_edge_topological, title="Edge (U=4.0, Gapless Edge States)")
 ```
 
@@ -123,7 +123,7 @@ At the critical point, the bulk gap **closes** at the $K$/$K'$ points, signaling
 **Bulk spectrum:**
 ```@example haldane-hubbard-cpt
 update!(haldane; U=4.6);
-spectra_transition = haldane(:EB, DynamicalSpectra(path, es); η=0.04);
+spectra_transition = haldane(:EB, DynamicalSpectra(path, es; η=0.04));
 plot(spectra_transition, title="Bulk (U=4.6, Gap Closing)")
 ```
 
@@ -134,14 +134,14 @@ In the trivial phase, the bulk gap reopens but there are **no gapless edge state
 **Bulk spectrum:**
 ```@example haldane-hubbard-cpt
 update!(haldane; U=5.0);
-spectra_trivial = haldane(:EB, DynamicalSpectra(path, es); η=0.04);
+spectra_trivial = haldane(:EB, DynamicalSpectra(path, es; η=0.04));
 plot(spectra_trivial, title="Bulk (U=5.0, Trivial)")
 ```
 
 **Edge spectrum:**
 ```@example haldane-hubbard-cpt
 update!(haldane_edge; U=5.0);
-spectra_edge_trivial = haldane_edge(:Edge, DynamicalSpectra(path_edge, es); η=0.04);
+spectra_edge_trivial = haldane_edge(:Edge, DynamicalSpectra(path_edge, es; η=0.04));
 plot(spectra_edge_trivial, title="Edge (U=5.0, No Edge States)")
 ```
 
