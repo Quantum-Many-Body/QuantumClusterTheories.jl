@@ -316,7 +316,7 @@ function expectation(
         end
         return result / length(brillouinzone) / 2π
     end
-    result = quadgk(f, -Inf, Inf; atol, rtol, maxevals)[1] / length(qct.lattice)
+    result = (quadgk(f, -Inf, 0; atol, rtol, maxevals)[1] + quadgk(f, 0, Inf; atol, rtol, maxevals)[1]) / length(qct.lattice)
     return result
 end
 @inline _matrix_(m::AbstractMatrix{<:Number}, ::AbstractVector{<:Number}) = m
