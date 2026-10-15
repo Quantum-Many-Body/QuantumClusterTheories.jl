@@ -1,6 +1,6 @@
 module QuantumClusterTheoriesExactDiagonalizationExt
 
-using ExactDiagonalization: Abelian, BandLanczosMethod, ED, GreenFunctionMethod, RetardedGreenFunction, normalize
+using ExactDiagonalization: Abelian, BandLanczosMethod, ED, GreenFunction, GreenFunctionKind, GreenFunctionMethod, normalize
 using LinearAlgebra: eigen, norm
 using QuantumLattices: AbstractLattice, Embedding, Hilbert, Lattice, Neighbors, OneOrMore, ZeroOrMore, OperatorGenerator, OperatorSet, QuantumOperator, Term, bonds, isintracell, kind, minimumlengths, nneighbor, rank, rcoordinate, scalartype, valtype
 using QuantumClusterTheories: Periodization, Perturbation, QCT, operators, qcttimer, quadratic
@@ -20,11 +20,11 @@ mutable struct Cache
 end
 
 """
-    EDSolver{E<:ED, G<:RetardedGreenFunction, O<:QuantumOperator, M<:GreenFunctionMethod} <: ImpuritySolver
+    EDSolver{E<:ED, G<:GreenFunction, O<:QuantumOperator, M<:GreenFunctionMethod} <: ImpuritySolver
 
 Exact diagonalization based impurity solver computing the retarded Green's function with caching.
 """
-mutable struct EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:RetardedGreenFunction} <: ImpuritySolver
+mutable struct EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:GreenFunction} <: ImpuritySolver
     const ed::E
     const operators::Vector{O}
     const method::M
@@ -34,7 +34,7 @@ mutable struct EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:Re
     G::Cache
     G⁻¹::Cache
     function EDSolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod; timer::TimerOutput=qcttimer)
-        G = Core.Compiler.return_type(RetardedGreenFunction, Tuple{typeof(operators), typeof(ed), typeof(method)})
+        G = Core.Compiler.return_type(GreenFunction, Tuple{typeof(operators), typeof(ed), GreenFunctionKind{:retarded}, typeof(method)})
         return new{typeof(ed), eltype(operators), typeof(method), G}(ed, operators, method, timer)
     end
 end
@@ -50,7 +50,7 @@ function set!(solver::EDSolver; ω::Number=1e-4im)
     if isnothing(cached)
         eigensystem = eigen(solver.ed; nev=1, timer=solver.timer)
         solver.Ω, v₀, sector₀ = only(eigensystem.values), only(eigensystem.vectors), only(eigensystem.sectors)
-        solver.gf = RetardedGreenFunction(solver.operators, solver.ed, solver.method; e₀=solver.Ω, v₀=v₀, sector₀=sector₀, timer=solver.timer)
+        solver.gf = GreenFunction(solver.operators, solver.ed, GreenFunctionKind(:retarded), solver.method; e₀=solver.Ω, v₀=v₀, sector₀=sector₀, timer=solver.timer)
         qlcsave(solver; ndecimal=14)
     else
         solver.Ω = cached.Ω
