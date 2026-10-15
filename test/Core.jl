@@ -238,3 +238,30 @@ end
     Plots.savefig(Plots.plot(vs, result), "Plots-Square-Hubbard-dSC.png")
     Makie.save("Makie-Square-Hubbard-dSC.png", Makie.lines(vs, result))
 end
+
+@testset "Partitioned VCA" begin
+    unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
+    lattice = Lattice(unitcell, (2, 4), ('P', 'P'))
+    hilbert = Hilbert(site=>Fock{:f}(1, 2) for site in eachindex(lattice))
+    t = Hopping(:t, -1.0, 1)
+    U = Hubbard(:U, 8.0)
+    μ = Onsite(:μ, -U.value/2)
+    m = Onsite(:m, 0.2, 𝕔⁺𝕔(:, :, σᶻ); amplitude=bond::Bond -> real(exp(1im*dot((π, π), rcoordinate(bond)))))
+    partition = ((1, 2, 3, 4), (5, 6, 7, 8)) => ℕ(4) ⊠ 𝕊ᶻ(0)
+    timer = TimerOutput()
+
+    # Vanishing Weiss field: partitioned VCA reduces to partitioned CPT
+    cpt = CPT(unitcell, lattice, hilbert, (t, μ, U), partition; timer)
+    vca₀ = VCA(unitcell, lattice, hilbert, (t, μ, U), zero(m), partition; timer)
+    ω, k = rand(ComplexF64), rand(2)
+    @test vca₀(ω, k) ≈ cpt(ω, k)
+    @test isapprox(Ω(vca₀), Ω(cpt); atol=1e-6)
+    @test isapprox(Ω(cpt), -4.4444120; atol=1e-6)
+
+    # Variational optimization of the staggered Weiss field
+    vca = Algorithm(:SquareHubbardPlaquette, VCA(unitcell, lattice, hilbert, (t, μ, U), m, partition; timer); timer)
+    op = optimize!(vca)[2]
+    @test isapprox(op.minimum, -4.4929112; atol=1e-6)
+    @test isapprox(op.minimizer[1], 0.19543; atol=1e-4)
+    @test op.minimum < Ω(cpt)
+end

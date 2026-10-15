@@ -434,4 +434,50 @@ function CPT(
     return QCT(unitcell, lattice, solver, pert, periodization)
 end
 
+"""
+    VCA(
+        unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term}, partition::OneOrMore{Pair},
+        method=BandLanczosMethod(), dtype::Type{<:Number}=promote_type(valtype(terms), valtype(weiss));
+        neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss)), timer::TimerOutput=qcttimer
+    ) -> VCA
+
+Construct a Variational Cluster Approach (VCA) frontend using exact diagonalization as the impurity solver with lattice partitioning.
+
+The rank-2 Weiss terms are added to the Hamiltonian of every sub-cluster; any Weiss operator coupling different sub-clusters is silently dropped, so each Weiss term must be confined within a single sub-cluster.
+"""
+function VCA(
+    unitcell::AbstractLattice, lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term}, partition::OneOrMore{Pair},
+    method=BandLanczosMethod(), dtype::Type{<:Number}=promote_type(valtype(terms), valtype(weiss));
+    neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss)), timer::TimerOutput=qcttimer
+)
+    @assert all(==(2), map(rank, OneOrMore(weiss))) "VCA error: weiss must be rank-2 terms."
+    solver = ImpuritySolver(lattice, hilbert, (OneOrMore(terms)..., OneOrMore(weiss)...), partition, method, dtype; neighbors, timer)
+    table = zeros(Int, length(lattice))
+    num = 1
+    for (clusters, _) in OneOrMore(partition)
+        for cluster in OneOrMore(clusters)
+            for site in cluster
+                table[site] = num
+            end
+            num += 1
+        end
+    end
+    bonds₁ = filter!(bonds(lattice, neighbors)) do bond
+        isintracell(bond) || return true
+        length(bond)==2 && return table[bond[1].site] ≠ table[bond[2].site]
+        return false
+    end
+    bonds₂ = filter!(bonds(lattice, neighbors)) do bond
+        isintracell(bond) || return false
+        length(bond)==2 && return table[bond[1].site] == table[bond[2].site]
+        return true
+    end
+    pert = Perturbation(bonds₁, bonds₂, hilbert, terms, weiss)
+    tbakind = kind(pert)
+    opsₗ = operators(tbakind, lattice, hilbert)
+    opsᵤ = operators(tbakind, unitcell, hilbert)
+    periodization = Periodization(opsₗ, opsᵤ, unitcell.vectors)
+    return QCT(unitcell, lattice, solver, pert, periodization)
+end
+
 end # module
