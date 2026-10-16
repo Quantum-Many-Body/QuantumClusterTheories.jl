@@ -43,7 +43,7 @@ end
 @inline contenttoconfig(solver::EDSolver) = (contenttoconfig(solver.ed), solver.operators, solver.method)
 function set!(solver::EDSolver; ω::Number=1e-4im)
     cached = try
-        qlload(pathof(solver, :cache), stamp(solver; ndecimal=14))
+        qlload(pathof(solver)*".qlc", stamp(solver; ndecimal=14))
     catch
         nothing
     end
