@@ -20,7 +20,7 @@ mutable struct Cache
 end
 
 """
-    EDSolver{E<:ED, G<:GreenFunction, O<:QuantumOperator, M<:GreenFunctionMethod} <: ImpuritySolver
+    EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:GreenFunction} <: ImpuritySolver
 
 Exact diagonalization based impurity solver computing the retarded Green's function with caching.
 """
@@ -34,8 +34,8 @@ mutable struct EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:Gr
     G::Cache
     G⁻¹::Cache
     function EDSolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod; timer::TimerOutput=qcttimer)
-        G = Core.Compiler.return_type(GreenFunction, Tuple{typeof(operators), typeof(ed), GreenFunctionKind{:retarded}, typeof(method)})
-        return new{typeof(ed), eltype(operators), typeof(method), G}(ed, operators, method, timer)
+        T = promote_type(scalartype(operators), scalartype(ed))
+        return new{typeof(ed), eltype(operators), typeof(method), GreenFunction{T, real(T)}}(ed, operators, method, timer)
     end
 end
 @inline Parameters(solver::EDSolver) = Parameters(solver.ed)
