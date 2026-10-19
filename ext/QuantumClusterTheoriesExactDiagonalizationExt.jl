@@ -1,12 +1,12 @@
 module QuantumClusterTheoriesExactDiagonalizationExt
 
-using ExactDiagonalization: Abelian, BandLanczosMethod, ED, GreenFunction, GreenFunctionKind, GreenFunctionMethod, normalize
-using LinearAlgebra: eigen, norm
+using ExactDiagonalization: Abelian, BandLanczosMethod, ED, GreenFunction, GreenFunctionKind, GreenFunctionMethod, ThermalSeedBandLanczosMethod, normalize
+using LinearAlgebra: Diagonal, eigen, norm
 using QuantumLattices: AbstractLattice, Embedding, Hilbert, Lattice, Neighbors, OneOrMore, ZeroOrMore, OperatorGenerator, OperatorSet, QuantumOperator, Term, bonds, isintracell, kind, minimumlengths, nneighbor, rank, rcoordinate, scalartype, valtype
 using QuantumClusterTheories: Periodization, Perturbation, QCT, operators, qcttimer, quadratic
 using TightBindingApproximation: TBA, TBAKind
 using TimerOutputs: TimerOutput
-import QuantumClusterTheories: CPT, ImpuritySolver, VCA, Ω
+import QuantumClusterTheories: CPT, ImpuritySolver, VCA, derivative, Ω
 import QuantumLattices: Parameters, contenttocache, contenttoconfig, qlcsave, qlload, stamp, update!
 
 """
@@ -33,14 +33,15 @@ mutable struct EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:Gr
     gf::G
     G::Cache
     G⁻¹::Cache
+    ∂G::Cache
     function EDSolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod; timer::TimerOutput=qcttimer)
         T = promote_type(scalartype(operators), scalartype(ed))
         return new{typeof(ed), eltype(operators), typeof(method), GreenFunction{T, real(T)}}(ed, operators, method, timer)
     end
 end
 @inline Parameters(solver::EDSolver) = Parameters(solver.ed)
-@inline contenttocache(solver::EDSolver) = (Ω=solver.Ω, gf=solver.gf)
-@inline contenttoconfig(solver::EDSolver) = (contenttoconfig(solver.ed), solver.operators, solver.method)
+@inline contenttocache(solver::EDSolver) = (Ω=solver.Ω, gf=solver.gf, samples=samples(solver.method))
+@inline contenttoconfig(solver::EDSolver) = (contenttoconfig(solver.ed), solver.operators, contenttoconfig(solver.method))
 function set!(solver::EDSolver; ω::Number=1e-4im)
     cached = try
         qlload(pathof(solver)*".qlc", stamp(solver; ndecimal=14))
@@ -55,9 +56,12 @@ function set!(solver::EDSolver; ω::Number=1e-4im)
     else
         solver.Ω = cached.Ω
         solver.gf = cached.gf
+        samples!(solver.method, get(cached, :samples, nothing))
     end
     solver.G = Cache(ω, solver.gf(ω))
     solver.G⁻¹ = Cache(ω, inv(solver.G.data))
+    gf = solver.gf
+    solver.∂G = Cache(ω, gf.L*Diagonal(@. -1/(ω-gf.E)^2)*transpose(gf.R))
     return solver
 end
 @inline function update!(solver::EDSolver; parameters...)
@@ -66,6 +70,14 @@ end
         set!(solver)
     end
     return solver
+end
+@inline samples(::GreenFunctionMethod) = nothing
+@inline samples(method::ThermalSeedBandLanczosMethod) = copy(method.samples)
+@inline samples!(method::GreenFunctionMethod, ::Any) = method
+@inline function samples!(method::ThermalSeedBandLanczosMethod, cached::Vector{<:GreenFunction})
+    empty!(method.samples)
+    append!(method.samples, cached)
+    return method
 end
 
 """
@@ -95,6 +107,23 @@ Return the inverse of the retarded Green's function at frequency `ω` using cach
         solver.G⁻¹ = Cache(ω, inv(solver(ω)))
     end
     return solver.G⁻¹.data
+end
+
+"""
+    derivative(solver::EDSolver, ω::Number) -> Matrix{ComplexF64}
+
+The frequency derivative of the retarded Green's function at frequency `ω`,
+`∂G[i,j]/∂ω = -Σₖ L[i,k]R[j,k]/(ω-E[k])²`, evaluated from the Lehmann pole representation
+using cached results when available.
+"""
+function derivative(solver::EDSolver, ω::Number)
+    if !isdefined(solver, :gf)
+        set!(solver; ω=ω)
+    elseif !(ω≈solver.∂G.ω)
+        gf = solver.gf
+        solver.∂G = Cache(ω, gf.L*Diagonal(@. -1/(ω-gf.E)^2)*transpose(gf.R))
+    end
+    return solver.∂G.data
 end
 
 """
@@ -271,47 +300,10 @@ mutable struct ComposedEDSolver{E<:EDSolver} <: ImpuritySolver
     const permutation::Vector{Int}
     G::Cache
     G⁻¹::Cache
+    ∂G::Cache
     function ComposedEDSolver(blocks::AbstractVector{Int}, representatives::AbstractVector{<:EDSolver}, permutation::AbstractVector{Int})
         return new{eltype(representatives)}(blocks, representatives, permutation)
     end
-end
-function setG!(solver::ComposedEDSolver; ω::Number=1e-4im)
-    ms = [solver.representatives[block](ω) for block in solver.blocks]
-    if isdefined(solver, :G)
-        fill!(solver.G.data, 0)
-    else
-        solver.G = Cache(ω, zeros(ComplexF64, mapreduce(size, .+, ms)))
-    end
-    solver.G.ω = ω
-    row, col = 1, 1
-    for block in solver.blocks
-        m = ms[block]
-        inc_row, inc_col = size(m)
-        solver.G.data[row:row+inc_row-1, col:col+inc_col-1] = m
-        row += inc_row
-        col += inc_col
-    end
-    solver.G.data[:] = @view solver.G.data[solver.permutation, solver.permutation]
-    return solver
-end
-function setG⁻¹!(solver::ComposedEDSolver; ω::Number=1e-4im)
-    ms = [inv(solver.representatives[block], ω) for block in solver.blocks]
-    if isdefined(solver, :G⁻¹)
-        fill!(solver.G⁻¹.data, 0)
-    else
-        solver.G⁻¹ = Cache(ω, zeros(ComplexF64, mapreduce(size, .+, ms)))
-    end
-    solver.G⁻¹.ω = ω
-    row, col = 1, 1
-    for block in solver.blocks
-        m = ms[block]
-        inc_row, inc_col = size(m)
-        solver.G⁻¹.data[row:row+inc_row-1, col:col+inc_col-1] = m
-        row += inc_row
-        col += inc_col
-    end
-    solver.G⁻¹.data[:] = @view solver.G⁻¹.data[solver.permutation, solver.permutation]
-    return solver
 end
 @inline Parameters(solver::ComposedEDSolver) = mapreduce(Parameters, merge, solver.representatives)
 @inline function update!(solver::ComposedEDSolver; parameters...)
@@ -321,7 +313,32 @@ end
         end
         setG!(solver)
         setG⁻¹!(solver)
+        set∂G!(solver)
     end
+    return solver
+end
+@inline setG!(solver::ComposedEDSolver; ω::Number=1e-4im) = setcache!(solver, :G, [solver.representatives[block](ω) for block in solver.blocks], ω)
+@inline setG⁻¹!(solver::ComposedEDSolver; ω::Number=1e-4im) = setcache!(solver, :G⁻¹, [inv(solver.representatives[block], ω) for block in solver.blocks], ω)
+@inline set∂G!(solver::ComposedEDSolver; ω::Number=1e-4im) = setcache!(solver, :∂G, [derivative(solver.representatives[block], ω) for block in solver.blocks], ω)
+# assemble the per-block matrices `ms` into the block-diagonal composed cache `field` at frequency `ω`, then permute
+function setcache!(solver::ComposedEDSolver, field::Symbol, ms::Vector{<:AbstractMatrix}, ω::Number)
+    if isdefined(solver, field)
+        cache = getfield(solver, field)
+        fill!(cache.data, 0)
+    else
+        cache = Cache(ω, zeros(ComplexF64, mapreduce(size, .+, ms)))
+        setfield!(solver, field, cache)
+    end
+    cache.ω = ω
+    row, col = 1, 1
+    for block in solver.blocks
+        m = ms[block]
+        inc_row, inc_col = size(m)
+        cache.data[row:row+inc_row-1, col:col+inc_col-1] = m
+        row += inc_row
+        col += inc_col
+    end
+    cache.data[:] = @view cache.data[solver.permutation, solver.permutation]
     return solver
 end
 
@@ -343,6 +360,16 @@ Return the inverse of the block-diagonal retarded Green's function at frequency 
 function Base.inv(solver::ComposedEDSolver, ω::Number)
     (isdefined(solver, :G⁻¹) && ω≈solver.G⁻¹.ω) || setG⁻¹!(solver; ω=ω)
     return solver.G⁻¹.data
+end
+
+"""
+    derivative(solver::ComposedEDSolver, ω::Number) -> Matrix{ComplexF64}
+
+The frequency derivative of the block-diagonal retarded Green's function at frequency `ω` using cached results when available.
+"""
+function derivative(solver::ComposedEDSolver, ω::Number)
+    (isdefined(solver, :∂G) && ω≈solver.∂G.ω) || set∂G!(solver; ω=ω)
+    return solver.∂G.data
 end
 
 """
