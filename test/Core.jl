@@ -57,6 +57,13 @@ import Plots
     @test inv(ω*I-m) ≈ solver(ω)
     @test invoke(inv, Tuple{ImpuritySolver, Number}, solver, ω) ≈ inv(solver, ω)
 
+    # the frequency derivative of the solver Green's function, cached per frequency
+    ∂G = derivative(solver, ω)
+    @test ∂G ≈ -inv(ω*I-m)^2
+    @test derivative(solver, ω)===∂G
+    ω′ = rand(ComplexF64)
+    @test derivative(solver, ω′) ≈ -inv(ω′*I-m)^2
+
     cpt = Algorithm(:Square, CPT(unitcell, lattice, hilbert, terms, quantumnumber))
     @test cpt(ω, k) ≈ inv(ω*I-[2cos(k[1])+2cos(k[2]) 0; 0 2cos(k[1])+2cos(k[2])])
     @test isapprox(Ω(cpt), -1.6210722; atol=1e-6)
@@ -258,10 +265,83 @@ end
     @test isapprox(Ω(vca₀), Ω(cpt); atol=1e-6)
     @test isapprox(Ω(cpt), -4.4444120; atol=1e-6)
 
+    # the frequency derivative of the composed solver Green's function, cached per frequency (fixed ω with O(1) imaginary part keeps the finite difference well conditioned
+    # the G cache buffer is reused in place, so copies are taken beforehand)
+    solver = cpt.solver
+    ω = 0.3 + 0.5im
+    ∂G = derivative(solver, ω)
+    @test derivative(solver, ω)===∂G
+    δ = 1e-6
+    @test isapprox(∂G, (copy(solver(ω+δ))-copy(solver(ω-δ)))/(2δ); atol=1e-5)
+
     # Variational optimization of the staggered Weiss field
     vca = Algorithm(:SquareHubbardPlaquette, VCA(unitcell, lattice, hilbert, (t, μ, U), m, partition; timer); timer)
     op = optimize!(vca)[2]
     @test isapprox(op.minimum, -4.4929112; atol=1e-6)
     @test isapprox(op.minimizer[1], 0.19543; atol=1e-4)
     @test op.minimum < Ω(cpt)
+end
+
+@testset "ThermalCPT" begin
+    μ = 0.3
+    η = 0.05
+
+    unitcell = Lattice([0.0]; vectors=[[1.0]])
+    lattice = Lattice(unitcell, (10,), ('P',))
+    hilbert = Hilbert(Fock{:f}(1, 2), length(lattice))
+    terms = (Hopping(:t, -1.0, 1), Onsite(:mu, -μ))
+    qn = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
+    thermal = Algorithm(:Chain10, CPT(unitcell, lattice, hilbert, terms, qn, ThermalSeedBandLanczosMethod(β=50.0, nrandom=1, maxdim₁=200, maxdim₂=200, seed=UInt64(1234))))
+    zero = Algorithm(:Chain10, CPT(unitcell, lattice, hilbert, terms, qn, BandLanczosMethod()))
+
+    ks = [0.13π, 0.37π, 0.5π, 0.71π, 0.91π, 1.0π]
+    ωs = LinRange(-4.0, 4.0, 81)
+    for k in ks, ω in ωs
+        z = ω + 1im*η
+        ε = -2cos(k) - μ
+        ref = [1/(z-ε) 0; 0 1/(z-ε)]
+        G = thermal(z, [k])
+        @test maximum(abs.(G - ref)) < 1e-8
+        @test maximum(abs.(G - zero(z, [k]))) < 1e-8
+    end
+
+    # spectral sum rule per momentum: ∫dω (-1/π)Im tr G(k, ω) = 2 (both spins)
+    ωs = LinRange(-6.0, 6.0, 1201)
+    W = 6.0
+    for k in ks
+        ε = -2cos(k) - μ
+        vals = [-imag(tr(thermal(ω + 1im*η, [k])))/π for ω in ωs]
+        A = (sum(vals)-(first(vals)+last(vals))/2) * step(ωs)
+        ref = 2*(atan((W-ε)/η) + atan((W+ε)/η))/π
+        @test isapprox(A, ref; atol=1e-6)
+    end
+end
+
+@testset "TBA" begin
+    # TBA(::QCT): the bare unitcell tight-binding system reconstructed from a QCT frontend coincides with the directly constructed one
+    unitcell = Lattice([0.0]; vectors=[[1.0]])
+    lattice = Lattice(unitcell, (4,), ('P',))
+    terms = (Hopping(:t, -1.0, 1), Onsite(:mu, -0.3))
+    cpt = CPT(unitcell, lattice, Hilbert(Fock{:f}(1, 2), length(lattice)), terms, ℕ(length(lattice)) ⊠ 𝕊ᶻ(0), BandLanczosMethod())
+    tba, ref = TBA(cpt), TBA(unitcell, Hilbert(Fock{:f}(1, 2), length(unitcell)), terms)
+    @test kind(tba)==kind(ref)
+    for k in ([0.13π], [0.47π], [0.83π], [π])
+        @test matrix(tba, k)==matrix(ref, k)
+        @test velocity(tba, k, 1)==velocity(ref, k, 1)
+    end
+
+    unitcell = Lattice([0.0, 0.0], [0.0, √3/3]; vectors=[[1.0, 0.0], [0.5, √3/2]])
+    lattice = Lattice(unitcell, (2, 2), ('P', 'P'))
+    terms = (
+        Hopping(:t, Complex(-1.0), 1),
+        Hopping(:t′, Complex(-0.2), 2; amplitude=bond::Bond->1im*cos(3*azimuth(rcoordinate(bond)))*(-1)^(bond[1].site%2))
+    )
+    cpt = Algorithm(:Haldane, CPT(unitcell, lattice, Hilbert(Fock{:f}(1, 2), length(lattice)), terms, ℕ(length(lattice)) ⊠ 𝕊ᶻ(0), BandLanczosMethod()))
+    tba, ref = TBA(cpt), TBA(unitcell, Hilbert(Fock{:f}(1, 2), length(unitcell)), terms)
+    @test kind(tba)==kind(ref)
+    for k in ([0.3, 0.1], [1.1, -0.7], [2.5, 2.0])
+        @test matrix(tba, k)==matrix(ref, k)
+        @test velocity(tba, k, 1)==velocity(ref, k, 1)
+        @test velocity(tba, k, 2)==velocity(ref, k, 2)
+    end
 end

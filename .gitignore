@@ -12,6 +12,7 @@
 *.qlc.bak
 Manifest.toml
 
+dev/
 deps/deps.jl
 docs/build/
 docs/Manifest.toml

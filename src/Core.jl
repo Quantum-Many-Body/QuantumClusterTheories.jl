@@ -3,11 +3,12 @@ using TimerOutputs: TimerOutput
 using Optim: LBFGS, Options, optimize
 using QuadGK: quadgk
 using QuantumLattices: AbstractLattice, Algorithm, Assignment, Bond, BrillouinZone, CoordinatedIndex, Data, Fock, Generator, Hilbert, Index, LatticeModel, Metric, Neighbors, OneOrMore, ReciprocalSpace, Table, Term, ZeroAtLeast
-using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubordinate, matrix, nneighbor, rank, rcoordinate, rtol
+using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubordinate, nneighbor, rank, rcoordinate, rtol
 using StaticArrays: SVector
-using TightBindingApproximation: TBA, TBAKind
+using TightBindingApproximation: TBAKind
 
-import QuantumLattices: Parameters, dependencytypes, kind, run!, update!
+import QuantumLattices: Parameters, dependencytypes, kind, matrix, options, run!, update!
+import TightBindingApproximation: TBA
 import TightBindingApproximation.Fitting: optimize!
 
 """
@@ -55,6 +56,13 @@ abstract type ImpuritySolver <: LatticeModel end
 Get the inverse of the retarded Green's function at frequency `ω`
 """
 @inline Base.inv(solver::ImpuritySolver, ω::Number) = inv(solver(ω))
+
+"""
+    derivative(solver::ImpuritySolver, ω::Number) -> Matrix{ComplexF64}
+
+The derivative of the impurity solver's Green's function with respect to its frequency argument.
+"""
+@inline derivative(solver::ImpuritySolver, ::Number) = error("derivative is not implemented for $(typeof(solver)).")
 
 """
     Perturbation
@@ -207,6 +215,22 @@ Return the number of unit cells in the cluster (i.e., the ratio of cluster size 
 @inline Base.count(periodization::Periodization) = length(periodization.coordinates)÷length(periodization.groups)
 
 """
+    matrix(periodization::Periodization, k::AbstractVector{<:Number}) -> Matrix{ComplexF64}
+
+The periodization as a linear map `U` such that the periodized data is `U*data*U'`.
+
+Precomputing the map shares the momentum-dependent phase factors across repeated evaluations at the same momentum (e.g., over a frequency grid), turning each evaluation into two small matrix multiplications instead of recomputing the phases per call.
+"""
+function matrix(periodization::Periodization, k::AbstractVector{<:Number})
+    L = count(periodization)
+    result = zeros(ComplexF64, length(periodization.groups), length(periodization.coordinates))
+    for (i, group) in enumerate(periodization.groups), m in group
+        result[i, m] = exp(-1im*dot(k, periodization.coordinates[m]))/sqrt(L)
+    end
+    return result
+end
+
+"""
     QCT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:Perturbation, P<:Periodization} <: LatticeModel
 
 Quantum cluster theory frontend that combines an impurity solver, perturbation, and crystallographic periodization to compute the Green's function of a system.
@@ -251,6 +275,21 @@ function (qct::QCT)(ω::Number, k::Union{AbstractVector{<:Number}, Nothing}=noth
     result = inv(G⁻¹-V)
     !isnothing(k) && periodization && (result = qct.periodization(result, k))
     return result
+end
+
+"""
+    TBA(qct::Union{QCT, Algorithm{<:QCT}}) -> TBA
+
+The bare tight-binding system on the unitcell of a quantum cluster theory, reconstructed from the physical quadratic terms and the Hilbert space carried by its perturbation, so that consistency with the Green's function is guaranteed by construction. Its Bloch Hamiltonian is the bare band structure `h₀(k)`, and its velocity vertices (`velocity`) enter e.g. the `Conductivity` task.
+
+The Weiss fields of VCA frontend are excluded. An error is thrown for a frontend constructed from pre-computed operators (e.g., from Wannier90), whose perturbation carries no terms.
+"""
+@inline TBA(qct::Algorithm{<:QCT}) = TBA(qct.frontend)
+function TBA(qct::QCT)
+    intercluster = qct.perturbation.intercluster
+    isempty(intercluster.system.terms) && error("TBA error: the bare tight-binding system is unavailable because the quantum cluster frontend was constructed from pre-computed operators rather than terms.")
+    hilbert = intercluster.system.hilbert
+    return TBA{typeof(kind(intercluster))}(qct.unitcell, Hilbert([hilbert[site] for site in eachindex(qct.unitcell)]), intercluster.system.terms)
 end
 
 """
@@ -388,10 +427,11 @@ function run!(qct::Algorithm{<:QCT}, ds::Assignment{<:DynamicalSpectra})
     η, rescale = ds.task.η, ds.task.rescale
     result = zeros(length(ds.task.energies), length(ds.task.reciprocalspace))
     Vs = [qct.frontend.perturbation(k) for k in ds.task.reciprocalspace]
+    Us = [matrix(qct.frontend.periodization, k) for k in ds.task.reciprocalspace]
     for (i, ω) in enumerate(ds.task.energies)
         G⁻¹ = inv(qct.frontend.solver, ω+1im*η)
-        for (j, (k, V)) in enumerate(zip(ds.task.reciprocalspace, Vs))
-            result[i, j] = rescale(-imag(tr(qct.frontend.periodization(inv(G⁻¹-V), k))))
+        for (j, (V, U)) in enumerate(zip(Vs, Us))
+            result[i, j] = rescale(-imag(tr(U*inv(G⁻¹-V)*U')))
         end
     end
     return DynamicalSpectraData(ds.task.reciprocalspace, ds.task.energies, result)
