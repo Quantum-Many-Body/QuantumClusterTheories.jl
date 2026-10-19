@@ -211,14 +211,14 @@ end
     @test isapprox(expectation(vca, M), -0.80705; atol=1e-4)
     @test isapprox(expectation(vca, :m), -0.80705; atol=1e-4)
 
-    vs = LinRange(0.0, 0.3, 31)
-    result = zeros(length(vs))
-    for (i, v) in enumerate(vs)
-        update!(vca; m=v)
-        result[i] = Ω(vca)
-    end
-    Plots.savefig(Plots.plot(vs, result), "Plots-Square-Hubbard-AFM.png")
-    Makie.save("Makie-Square-Hubbard-AFM.png", Makie.lines(vs, result))
+    # vs = LinRange(0.0, 0.3, 31)
+    # result = zeros(length(vs))
+    # for (i, v) in enumerate(vs)
+    #     update!(vca; m=v)
+    #     result[i] = Ω(vca)
+    # end
+    # Plots.savefig(Plots.plot(vs, result), "Plots-Square-Hubbard-AFM.png")
+    # Makie.save("Makie-Square-Hubbard-AFM.png", Makie.lines(vs, result))
 end
 
 @testset "Square-Hubbard-dSC" begin
@@ -236,14 +236,14 @@ end
     @test isapprox(op.minimum, -1.8009791; atol=1e-6)
     @test isapprox(op.minimizer[1], 0.14984; atol=1e-4)
 
-    vs = LinRange(0.0, 0.3, 31)
-    result = zeros(length(vs))
-    for (i, v) in enumerate(vs)
-        update!(vca; Δ=v)
-        result[i] = Ω(vca)
-    end
-    Plots.savefig(Plots.plot(vs, result), "Plots-Square-Hubbard-dSC.png")
-    Makie.save("Makie-Square-Hubbard-dSC.png", Makie.lines(vs, result))
+    # vs = LinRange(0.0, 0.3, 31)
+    # result = zeros(length(vs))
+    # for (i, v) in enumerate(vs)
+    #     update!(vca; Δ=v)
+    #     result[i] = Ω(vca)
+    # end
+    # Plots.savefig(Plots.plot(vs, result), "Plots-Square-Hubbard-dSC.png")
+    # Makie.save("Makie-Square-Hubbard-dSC.png", Makie.lines(vs, result))
 end
 
 @testset "Partitioned VCA" begin
@@ -265,8 +265,7 @@ end
     @test isapprox(Ω(vca₀), Ω(cpt); atol=1e-6)
     @test isapprox(Ω(cpt), -4.4444120; atol=1e-6)
 
-    # the frequency derivative of the composed solver Green's function, cached per frequency (fixed ω with O(1) imaginary part keeps the finite difference well conditioned
-    # the G cache buffer is reused in place, so copies are taken beforehand)
+    # the frequency derivative of the composed solver Green's function, cached per frequency (fixed ω with O(1) imaginary part keeps the finite difference well conditioned)
     solver = cpt.solver
     ω = 0.3 + 0.5im
     ∂G = derivative(solver, ω)

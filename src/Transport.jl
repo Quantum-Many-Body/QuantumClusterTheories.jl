@@ -1,3 +1,4 @@
+using LinearAlgebra: axpby!, inv!, lu!, mul!
 using QuantumLattices: volume
 using TightBindingApproximation: velocity
 
@@ -61,44 +62,52 @@ function run!(qct::Algorithm{<:QCT}, assignment::Assignment{<:Conductivity}; gau
     S = volume(frontend.unitcell)
     solver = frontend.solver
     # per-momentum precomputation
-    Us = [matrix(frontend.periodization, k) for k in bz]
     Vs = [frontend.perturbation(k) for k in bz]
     H₀ = TBA(frontend)
-    vs = [[velocity(H₀, k, α; gauge=gauge) for k in bz] for α in 1:dim]
+    # velocity vertices mapped to the cluster space by the periodization, Wₐ(k) = U(k)'vₐ(k)U(k), so that `tr(vₐ(k)A(k)vₐ′(k)A(k)) = tr(Wₐ(k)Ã(k)Wₐ′(k)Ã(k))` with Ã=U'AU because UU'=I
+    Ws = [[begin U = matrix(frontend.periodization, k); U'*velocity(H₀, k, α; gauge=gauge)*U end for k in bz] for α in 1:dim]
     # the conductivity tensors
     surf = zeros(Float64, dim, dim)
     sea = zeros(Float64, dim, dim)
     if isinf(task.β)
         # zero temperature: -∂f = δ(ω) collapses the surf term to ω=0
         if task.which∈(:surf, :both)
+            n = size(first(Vs), 1)
+            G̃, A = ntuple(i->Matrix{ComplexF64}(undef, n, n), 2)
+            WAs = ntuple(i->Matrix{ComplexF64}(undef, n, n), dim)
+            G⁻¹ = inv(solver, task.μ+1im*task.η)
             for ik in 1:Nk
-                A = spectral(periodized(solver, task.μ+1im*task.η, Us[ik], Vs[ik]))
+                spectral!(A, periodized!(G̃, G⁻¹, Vs[ik]))
+                for α in 1:dim
+                    mul!(WAs[α], Ws[α][ik], A)
+                end
                 for α′ = 1:dim, α = 1:dim
-                    surf[α, α′] += real(tr(vs[α][ik]*A*vs[α′][ik]*A))
+                    # cluster-space equivalent of `surf[α, α′] += real(tr(vs[α][ik]*A*vs[α′][ik]*A))`
+                    surf[α, α′] += real(trprod(WAs[α], WAs[α′]))
                 end
             end
             surf .*= 2π^2/(S*Nk)
         end
         if task.which∈(:sea, :both)
-            integrand = integrandˢᵉᵃ(solver, Us, Vs, vs, task.μ, task.β, task.η)
+            integrand = integrandˢᵉᵃ(solver, Ws, Vs, task.μ, task.β, task.η)
             vals = quadgk(integrand, -Inf, 0.0; rtol=rtol, atol=atol)[1]
             sea .= reshape(vals, dim, dim)
             sea .*= 1/(2S*Nk)
         end
     elseif task.which==:both
-        integrand = integrandᵇᵒᵗʰ(solver, Us, Vs, vs, task.μ, task.β, task.η)
+        integrand = integrandᵇᵒᵗʰ(solver, Ws, Vs, task.μ, task.β, task.η)
         vals = quadgk(integrand, -Inf, Inf; rtol=rtol, atol=atol)[1]
         surf .= reshape(vals[1:dim^2], dim, dim)
         sea .= reshape(vals[dim^2+1:end], dim, dim)
         surf .*= 2π^2/(S*Nk)
         sea .*= 1/(2S*Nk)
     elseif task.which==:surf
-        integrand = integrandˢᵘʳᶠ(solver, Us, Vs, vs, task.μ, task.β, task.η)
+        integrand = integrandˢᵘʳᶠ(solver, Ws, Vs, task.μ, task.β, task.η)
         vals = quadgk(integrand, -Inf, Inf; rtol=rtol, atol=atol)[1]
         surf .= reshape(vals, dim, dim)
         surf .*= 2π^2/(S*Nk)
     else
-        integrand = integrandˢᵉᵃ(solver, Us, Vs, vs, task.μ, task.β, task.η)
+        integrand = integrandˢᵉᵃ(solver, Ws, Vs, task.μ, task.β, task.η)
         vals = quadgk(integrand, -Inf, Inf; rtol=rtol, atol=atol)[1]
         sea .= reshape(vals, dim, dim)
         sea .*= 1/(2S*Nk)
@@ -106,68 +115,121 @@ function run!(qct::Algorithm{<:QCT}, assignment::Assignment{<:Conductivity}; gau
     return ConductivityData(task.brillouinzone, surf, sea, surf+sea)
 end
 
-# spectral matrix from the retarded Green's function
-@inline spectral(Gʳ::AbstractMatrix) = (Gʳ - Gʳ')/(2π*1im)
-
-# the periodized Green's function at complex frequency `z` and one momentum
-@inline function periodized(solver, z, U, V)
-    𝒢 = inv(inv(solver, z) - V)
-    return U*𝒢*U'
+# in-place evaluation of the cluster-space Green's function G̃ = inv(G⁻¹-V); the result aliases `G̃`
+@inline function periodized!(G̃::Matrix{ComplexF64}, G⁻¹::AbstractMatrix{<:Number}, V::AbstractMatrix{<:Number})
+    copyto!(G̃, G⁻¹)
+    axpby!(-1, V, 1, G̃)
+    return inv!(lu!(G̃))
 end
-# ... together with its frequency derivative
-@inline function ∂periodized(solver, z, U, V)
-    G⁻¹ = inv(solver, z)
-    ∂G = derivative(solver, z)
-    𝒢 = inv(G⁻¹ - V)
-    return U*𝒢*U', U*(𝒢*(G⁻¹*∂G*G⁻¹)*𝒢)*U'
+# in-place cluster-space frequency derivative ∂G̃ = G̃ M G̃ with M = G⁻¹ ∂G G⁻¹
+@inline function ∂periodized!(∂G̃::Matrix{ComplexF64}, G̃::AbstractMatrix{<:Number}, M::Matrix{ComplexF64}, t::Matrix{ComplexF64})
+    mul!(t, M, G̃)
+    mul!(∂G̃, G̃, t)
+    return ∂G̃
+end
+# in-place spectral matrix A = (G̃-G̃')/(2πi)
+@inline function spectral!(A::Matrix{ComplexF64}, G̃::AbstractMatrix{<:Number})
+    n = size(G̃, 1)
+    @inbounds for j in 1:n, i in 1:n
+        A[i, j] = (G̃[i, j]-conj(G̃[j, i]))/(2π*1im)
+    end
+    return A
+end
+# in-place D = ∂G̃+∂G̃' and X = G̃-G̃'
+@inline function DX!(D::Matrix{ComplexF64}, X::Matrix{ComplexF64}, G̃::AbstractMatrix{<:Number}, ∂G̃::AbstractMatrix{<:Number})
+    n = size(G̃, 1)
+    @inbounds for j in 1:n, i in 1:n
+        D[i, j] = ∂G̃[i, j]+conj(∂G̃[j, i])
+        X[i, j] = G̃[i, j]-conj(G̃[j, i])
+    end
+    return D, X
 end
 
 # the ω integrands for quadgk
-function integrandˢᵘʳᶠ(solver, Us, Vs, vs,  μ, β, η)
-    dim, Nk = length(vs), length(Us)
+function integrandˢᵘʳᶠ(solver, Ws, Vs, μ, β, η)
+    dim, Nk = length(Ws), length(Vs)
+    n = size(first(Vs), 1)
+    G̃, A = ntuple(i->Matrix{ComplexF64}(undef, n, n), 2)
+    WAs = ntuple(i->Matrix{ComplexF64}(undef, n, n), dim)
     return function (ω)
         z = ω + μ + 1im*η
         acc = zeros(ComplexF64, dim, dim)
         w = ∂fermi(β, ω)
+        G⁻¹ = inv(solver, z)
         for ik in 1:Nk
-            A = spectral(periodized(solver, z, Us[ik], Vs[ik]))
+            spectral!(A, periodized!(G̃, G⁻¹, Vs[ik]))
+            for α in 1:dim
+                mul!(WAs[α], Ws[α][ik], A)
+            end
             for α′ = 1:dim, α = 1:dim
-                acc[α, α′] += w*tr(vs[α][ik]*A*vs[α′][ik]*A)
+                # cluster-space equivalent of `acc[α, α′] += w*tr(vs[α][ik]*A*vs[α′][ik]*A)`
+                acc[α, α′] += w*trprod(WAs[α], WAs[α′])
             end
         end
         return real.(vec(acc))
     end
 end
-function integrandˢᵉᵃ(solver, Us, Vs, vs,  μ, β, η)
-    dim, Nk = length(vs), length(Us)
+function integrandˢᵉᵃ(solver, Ws, Vs, μ, β, η)
+    dim, Nk = length(Ws), length(Vs)
+    n = size(first(Vs), 1)
+    G̃, ∂G̃, D, X, M, t = ntuple(i->Matrix{ComplexF64}(undef, n, n), 6)
+    WDs = ntuple(i->Matrix{ComplexF64}(undef, n, n), dim)
+    WXs = ntuple(i->Matrix{ComplexF64}(undef, n, n), dim)
     return function (ω)
         z = ω + μ + 1im*η
         acc = zeros(ComplexF64, dim, dim)
         w = isinf(β) ? 1.0 : fermi(β, ω)
+        G⁻¹, ∂G = inv(solver, z), derivative(solver, z)
+        # M = G⁻¹ ∂G G⁻¹ is momentum independent and computed once per frequency
+        mul!(t, ∂G, G⁻¹)
+        mul!(M, G⁻¹, t)
         for ik in 1:Nk
-            G, ∂G = ∂periodized(solver, z, Us[ik], Vs[ik])
-            D, X = ∂G + ∂G', G - G'
+            G̃m = periodized!(G̃, G⁻¹, Vs[ik])
+            ∂periodized!(∂G̃, G̃m, M, t)
+            DX!(D, X, G̃m, ∂G̃)
+            for α in 1:dim
+                mul!(WDs[α], Ws[α][ik], D)
+                mul!(WXs[α], Ws[α][ik], X)
+            end
             for α′ = 1:dim, α = 1:dim
-                acc[α, α′] += w*tr((vs[α][ik]*D*vs[α′][ik] - vs[α′][ik]*D*vs[α][ik])*X)
+                # cluster-space equivalent of `acc[α, α′] += w*tr((vs[α][ik]*D*vs[α′][ik]-vs[α′][ik]*D*vs[α][ik])*X)`
+                acc[α, α′] += w*(trprod(WDs[α], WXs[α′])-trprod(WDs[α′], WXs[α]))
             end
         end
         return real.(vec(acc))
     end
 end
-function integrandᵇᵒᵗʰ(solver, Us, Vs, vs,  μ, β, η)
-    dim, Nk = length(vs), length(Us)
+function integrandᵇᵒᵗʰ(solver, Ws, Vs, μ, β, η)
+    dim, Nk = length(Ws), length(Vs)
+    n = size(first(Vs), 1)
+    G̃, ∂G̃, A, D, X, M, t = ntuple(i->Matrix{ComplexF64}(undef, n, n), 7)
+    WAs = ntuple(i->Matrix{ComplexF64}(undef, n, n), dim)
+    WDs = ntuple(i->Matrix{ComplexF64}(undef, n, n), dim)
+    WXs = ntuple(i->Matrix{ComplexF64}(undef, n, n), dim)
     return function (ω)
         z = ω + μ + 1im*η
         accˢᵘʳᶠ = zeros(ComplexF64, dim, dim)
         accˢᵉᵃ = zeros(ComplexF64, dim, dim)
-        ws, wv = ∂fermi(β, ω), fermi(β, ω)
+        ∂f, f = ∂fermi(β, ω), fermi(β, ω)
+        G⁻¹, ∂G = inv(solver, z), derivative(solver, z)
+        mul!(t, ∂G, G⁻¹)
+        mul!(M, G⁻¹, t)
         for ik in 1:Nk
-            G, ∂G = ∂periodized(solver, z, Us[ik], Vs[ik])
-            A = spectral(G)
-            D, X = ∂G + ∂G', G - G'
+            G̃m = periodized!(G̃, G⁻¹, Vs[ik])
+            ∂periodized!(∂G̃, G̃m, M, t)
+            spectral!(A, G̃m)
+            DX!(D, X, G̃m, ∂G̃)
+            for α in 1:dim
+                mul!(WAs[α], Ws[α][ik], A)
+                mul!(WDs[α], Ws[α][ik], D)
+                mul!(WXs[α], Ws[α][ik], X)
+            end
             for α′ = 1:dim, α = 1:dim
-                accˢᵘʳᶠ[α, α′] += ws*tr(vs[α][ik]*A*vs[α′][ik]*A)
-                accˢᵉᵃ[α, α′] += wv*tr((vs[α][ik]*D*vs[α′][ik] - vs[α′][ik]*D*vs[α][ik])*X)
+                # cluster-space equivalents of
+                # `accˢᵘʳᶠ[α, α′] += ∂f*tr(vs[α][ik]*A*vs[α′][ik]*A)`
+                # `accˢᵉᵃ[α, α′] += f*tr((vs[α][ik]*D*vs[α′][ik]-vs[α′][ik]*D*vs[α][ik])*X)`
+                accˢᵘʳᶠ[α, α′] += ∂f*trprod(WAs[α], WAs[α′])
+                accˢᵉᵃ[α, α′] += f*(trprod(WDs[α], WXs[α′])-trprod(WDs[α′], WXs[α]))
             end
         end
         return vcat(real.(vec(accˢᵘʳᶠ)), real.(vec(accˢᵉᵃ)))

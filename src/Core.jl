@@ -1,4 +1,4 @@
-using LinearAlgebra: I, det, dot, tr
+using LinearAlgebra: I, axpby!, dot, inv!, logabsdet, lu!, mul!, tr
 using TimerOutputs: TimerOutput
 using Optim: LBFGS, Options, optimize
 using QuadGK: quadgk
@@ -306,11 +306,15 @@ For `Algorithm{<:VCA}`, this delegates to the second method.
 @inline Ω(qct::Algorithm{<:QCT}; kwargs...) = Ω(qct.frontend; kwargs...)
 function Ω(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(qct.lattice, 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6)
     Vs = [qct.perturbation(k) for k in brillouinzone]
+    buffer = Matrix{ComplexF64}(undef, size(first(Vs)))
     function f(ω::Real)
         result = 0.0
         G = qct.solver(1im*ω+μ)
         for V in Vs
-            result -= log(abs(det(I-V*G)))
+            # in-place equivalent of `result -= log(abs(det(I-V*G)))`
+            copyto!(buffer, I)
+            mul!(buffer, V, G, -1, true)
+            result -= logabsdet(lu!(buffer))[1]
         end
         return result / length(brillouinzone) / π
     end
@@ -347,11 +351,15 @@ function expectation(
     Vs = [qct.perturbation(k) for k in brillouinzone]
     Ss = [_matrix_(m, k) for k in brillouinzone]
     Ts = [tr(S) for S in Ss]
+    buffer = Matrix{ComplexF64}(undef, size(first(Vs)))
     function f(ω::Real)
         result = Complex(0.0)
         G⁻¹ = inv(qct.solver, 1im*ω+μ)
         for (V, S, T) in zip(Vs, Ss, Ts)
-            result += tr(S*inv(G⁻¹-V)) - T/(1im*ω-p)
+            # in-place equivalent of `result += tr(S*inv(G⁻¹-V)) - T/(1im*ω-p)`
+            copyto!(buffer, G⁻¹)
+            axpby!(-1, V, 1, buffer)
+            result += trprod(S, inv!(lu!(buffer))) - T/(1im*ω-p)
         end
         return result / length(brillouinzone) / 2π
     end
@@ -394,6 +402,21 @@ function optimize!(
 end
 
 """
+    trprod(A::AbstractMatrix, B::AbstractMatrix) -> Number
+
+Compute `tr(A*B)` without forming the product matrix.
+"""
+@inline function trprod(A::AbstractMatrix, B::AbstractMatrix)
+    n = size(A, 1)
+    @assert n==size(A, 2)==size(B, 1)==size(B, 2)
+    s = zero(promote_type(eltype(A), eltype(B)))
+    @inbounds for j in 1:n, i in 1:n
+        s += A[i, j]*B[j, i]
+    end
+    return s
+end
+
+"""
     DynamicalSpectra{R<:ReciprocalSpace, F<:Function}
 
 Dynamical spectra.
@@ -427,11 +450,16 @@ function run!(qct::Algorithm{<:QCT}, ds::Assignment{<:DynamicalSpectra})
     η, rescale = ds.task.η, ds.task.rescale
     result = zeros(length(ds.task.energies), length(ds.task.reciprocalspace))
     Vs = [qct.frontend.perturbation(k) for k in ds.task.reciprocalspace]
-    Us = [matrix(qct.frontend.periodization, k) for k in ds.task.reciprocalspace]
+    # M = U'*U so that `tr(U*X*U') == tr(X*M)` by the cyclicity of trace, avoiding the U-sandwich per frequency
+    Ms = [(U = matrix(qct.frontend.periodization, k); U'*U) for k in ds.task.reciprocalspace]
+    buffer = Matrix{ComplexF64}(undef, size(first(Vs)))
     for (i, ω) in enumerate(ds.task.energies)
         G⁻¹ = inv(qct.frontend.solver, ω+1im*η)
-        for (j, (V, U)) in enumerate(zip(Vs, Us))
-            result[i, j] = rescale(-imag(tr(U*inv(G⁻¹-V)*U')))
+        for (j, (V, M)) in enumerate(zip(Vs, Ms))
+            # in-place equivalent of `result[i, j] = rescale(-imag(tr(U*inv(G⁻¹-V)*U')))`
+            copyto!(buffer, G⁻¹)
+            axpby!(-1, V, 1, buffer)
+            result[i, j] = rescale(-imag(trprod(inv!(lu!(buffer)), M)))
         end
     end
     return DynamicalSpectraData(ds.task.reciprocalspace, ds.task.energies, result)

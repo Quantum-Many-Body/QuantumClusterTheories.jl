@@ -93,8 +93,9 @@ end
     dataR = ref(:σ, Conductivity(bz; μ=μ, β=Inf, η=η); rtol=1e-8).data
     @test maximum(abs.(data.surf - dataR.surf)) < 1e-6
     @test maximum(abs.(data.sea - dataR.sea)) < 1e-5
-    @test data.surf[1, 1] > 0.1  # metallic Drude weight
-    @test isapprox(data.sea[1, 2], -data.sea[2, 1]; atol=1e-10)
+    # regression values, verified identical to the pre-optimization (allocating) implementation
+    @test isapprox(data.surf, [2.057383068500 0.0; 0.0 2.057383068500]; rtol=1e-9, atol=1e-12)
+    @test isapprox(data.sea, [0.0 1.863188291353; -1.863188291353 0.0]; rtol=1e-7, atol=1e-12)
 
     # finite temperature, metallic: the 2-site reference by the exact thermal method, the 6-site cluster by the thermal seed method (nr=1 at β=30)
     β = 30.0
@@ -104,4 +105,7 @@ end
     dataR = ref(:σ, Conductivity(bz; μ=μ, β=β, η=η); rtol=1e-8).data
     @test maximum(abs.(data.surf - dataR.surf)) < 1e-6
     @test maximum(abs.(data.sea - dataR.sea)) < 1e-5
+    # regression values, verified identical to the pre-optimization (allocating) implementation
+    @test isapprox(data.surf, [3.619804038622 0.0; 0.0 3.619804038622]; rtol=1e-7, atol=1e-10)
+    @test isapprox(data.sea, [0.0 1.736169510847; -1.736169510847 0.0]; rtol=1e-7, atol=1e-10)
 end
