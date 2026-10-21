@@ -8,7 +8,7 @@ using TightBindingApproximation: velocity
 The dc conductivity tensor task: the bubble approximation of the Kubo-Bastin formula with the permutation decomposition (Bonbien & Manchon, arXiv:2005.04678),
 
     σ = σˢᵘʳᶠ + σˢᵉᵃ
-    σˢᵘʳᶠ_αα′ = (2π²e²/h)(1/SN)Σ_k ∫dω (-∂_ωf) Tr[v_α(k)A(k,ω)v_α′(k)A(k,ω)]        (symmetric, Fermi-surface)
+    σˢᵘʳᶠ_αα′ = (2π²e²/h)(1/SN)Σ_k ∫dω (-∂_ωf) Tr[v_α(k)A(k,ω)v_α′(k)A(k,ω)]       (symmetric, Fermi-surface)
     σˢᵉᵃ_αα′ = (e²/2h)(1/SN)Σ_k ∫dω f(ω) Tr[{v_α∂_ω(Gʳ+Gᵃ)v_α′ - (α↔α′)}(Gʳ-Gᵃ)]   (antisymmetric, Fermi-sea)
 
 with S the unitcell volume, N the number of momenta, `A = (Gʳ-Gᵃ)/2πi` the spectral matrix, G the periodized quantum cluster Green's function, and `v_α(k) = ∂h₀(k)/∂k_α` the bare velocity vertex obtained from the `velocity` of `TBA(qct)`, the bare unitcell tight-binding system reconstructed from the quantum cluster theory frontend, so that the vertices are guaranteed to be consistent with the Green's function. Vertex corrections are neglected (exact in DMFT, an approximation for CPT/VCA). The returned tensors are in units of e²/h (per layer).
@@ -19,7 +19,7 @@ with S the unitcell volume, N the number of momenta, `A = (Gʳ-Gᵃ)/2πi` the s
 - `η`: the Lorentzian broadening of the Green's function (plays the role of a phenomenological scattering rate).
 - `which`: which part(s) of the conductivity to compute, `:surf`, `:sea` or `:both`.
 
-Run-time options (passed at the assignment call site, see [`options`](@ref)):
+Run-time options (passed at the assignment call site, see `options`):
 - `gauge` (default `:rcoordinate`): the gauge of the velocity vertices; the default is the gauge of  the periodized Green's function of [`QCT`](@ref).
 - `rtol` (default `1e-6`), `atol` (default `0.0`): relative/absolute tolerance of the adaptive  quadrature (`quadgk`). The ω integrals are evaluated by `quadgk` over the infinite interval (`(-Inf, 0)` for the sea term at zero temperature, `(-Inf, Inf)` otherwise), with the momentum-mesh sum inside the integrand; the impurity solver caches its Green's function (and its inverse) at the latest frequency, so it is evaluated only once per quadrature node and shared across all momenta.
 """
