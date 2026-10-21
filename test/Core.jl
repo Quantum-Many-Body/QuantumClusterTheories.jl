@@ -48,7 +48,8 @@ import Plots
     tba = TBA(Lattice(unitcell, (2, 2), ('O', 'O')), hilbert, first(terms))
     m = matrix(tba)
     k = rand(2)
-    @test periodization(m, k) ≈ [cos(k[1])+cos(k[2]) 0; 0 cos(k[1])+cos(k[2])]
+    U = matrix(periodization, k)
+    @test periodization(m, k) ≈ U*m*U' ≈ [cos(k[1])+cos(k[2]) 0; 0 cos(k[1])+cos(k[2])]
 
     quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
     solver = ImpuritySolver(lattice, hilbert, terms, quantumnumber)
