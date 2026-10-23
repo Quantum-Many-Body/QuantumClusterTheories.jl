@@ -89,6 +89,43 @@ end
     Makie.save("Makie-Hubbard-Square-2x2-spectral.png", Makie.plot(spectra))
 end
 
+@testset "PBC cluster" begin
+    unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
+    lattice = Lattice(unitcell, (2, 2), ('P', 'P'))
+    hilbert = Hilbert(site=>Fock{:f}(1, 2) for site in eachindex(lattice))
+    t = Hopping(:t, -1.0, 1)
+    U = Hubbard(:U, 8.0)
+    μ = Onsite(:μ, -U.value/2)
+    quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
+    ω = rand(ComplexF64)
+    k = rand(2)
+
+    # Test A: the periodic perturbation subtracts the intercluster terms as a k-independent real-space matrix
+    pert_obc = Perturbation(lattice, hilbert, (t, μ, U))
+    pert_pbc = Perturbation(lattice, hilbert, (t, μ, U); periodic=true)
+    @test pert_pbc(k) ≈ pert_obc(k) - matrix(pert_obc.intercluster)
+    @test pert_pbc() ≈ zeros(size(pert_obc()))
+
+    # Test B: the periodic impurity solver matches a direct PBC exact diagonalization of the cluster
+    solver = ImpuritySolver(lattice, hilbert, (t, μ, U), quantumnumber; periodic=true)
+    ed = ED(lattice, hilbert, (t, μ, U), quantumnumber)
+    ref = ImpuritySolver(ed, operators(Fermionic(:TBA), lattice, hilbert))
+    @test solver(ω) ≈ ref(ω)
+
+    # Test C: without interactions (U=0), periodic CPT recovers the exact bare Green's function and grand potential
+    terms₀ = (Hopping(:t, 1.0, 1), Hubbard(:U, 0.0))
+    cpt₀ = Algorithm(:SquarePBC, CPT(unitcell, lattice, hilbert, terms₀, quantumnumber; periodic=true))
+    @test cpt₀(ω, k) ≈ inv(ω*I-[2cos(k[1])+2cos(k[2]) 0; 0 2cos(k[1])+2cos(k[2])])
+    @test isapprox(Ω(cpt₀), -1.6210722; atol=1e-6)
+
+    # Test D: with interactions, the term-based and operator-based constructions agree, and differ from open boundaries
+    cpt = CPT(unitcell, lattice, hilbert, (t, μ, U), quantumnumber; periodic=true)
+    ops = expand(OperatorGenerator(bonds(unitcell, 1), Hilbert(Fock{:f}(1, 2), length(unitcell)), (t, μ)))
+    cpt′ = CPT(unitcell, ops, lattice, hilbert, U, quantumnumber; periodic=true)
+    @test isapprox(Ω(cpt), Ω(cpt′); atol=1e-6)
+    @test !isapprox(Ω(cpt), -4.4444120; atol=1e-6)
+end
+
 @testset "Operator-based CPT/VCA" begin
     unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
     lattice = Lattice(unitcell, (2, 2), ('P', 'P'))

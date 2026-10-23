@@ -77,40 +77,51 @@ abstract type Perturbation end
     CPTPerturbation{V<:TBA} <: Perturbation
 
 CPT (cluster perturbation theory) perturbation containing the intercluster quadratic terms of a system.
+
+When `periodic` is `true`, the intercluster terms are also subtracted as a momentum-independent real-space matrix, so that the same terms can be included in the impurity solver as periodic boundary conditions of the cluster without changing the total Hamiltonian.
 """
 struct CPTPerturbation{V<:TBA} <: Perturbation
     intercluster::V
+    periodic::Bool
 end
+@inline CPTPerturbation(intercluster::TBA) = CPTPerturbation(intercluster, false)
 @inline kind(::Type{<:CPTPerturbation{V}}) where {V<:TBA} = kind(V)
 @inline update!(perturbation::CPTPerturbation; parameters...) = (update!(perturbation.intercluster; parameters...); perturbation)
-@inline (perturbation::CPTPerturbation)(k::Union{AbstractVector{<:Number}, Nothing}=nothing) = matrix(perturbation.intercluster, k)
+@inline function (perturbation::CPTPerturbation)(k::Union{AbstractVector{<:Number}, Nothing}=nothing)
+    return perturbation.periodic ? matrix(perturbation.intercluster, k)-matrix(perturbation.intercluster) : matrix(perturbation.intercluster, k)
+end
 
 """
-    Perturbation(intercluster::TBA) -> CPTPerturbation
-    Perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms)) -> CPTPerturbation
-    Perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}) -> CPTPerturbation
+    Perturbation(intercluster::TBA; periodic::Bool=false) -> CPTPerturbation
+    Perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms), periodic::Bool=false) -> CPTPerturbation
+    Perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}; periodic::Bool=false) -> CPTPerturbation
 
 Construct a CPT perturbation from a pre-built `TBA`, or from a lattice/hilbert/terms, or from bonds/hilbert/terms.
+
+`periodic=true` indicates that the intercluster terms are also present in the impurity solver as periodic boundary conditions of the cluster, so that they are subtracted as a momentum-independent real-space matrix.
 """
-@inline Perturbation(intercluster::TBA) = CPTPerturbation(intercluster)
-@inline function Perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms))
-    return Perturbation(filter!(!isintracell, bonds(lattice, neighbors)), hilbert, terms)
+@inline Perturbation(intercluster::TBA; periodic::Bool=false) = CPTPerturbation(intercluster, periodic)
+@inline function Perturbation(lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}; neighbors::Union{Int, Neighbors}=nneighbor(terms), periodic::Bool=false)
+    return Perturbation(filter!(!isintracell, bonds(lattice, neighbors)), hilbert, terms; periodic)
 end
-function Perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term})
-    return CPTPerturbation(TBA(Generator(bonds, hilbert, quadratic(OneOrMore(terms)); half=false)))
+function Perturbation(bonds::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}; periodic::Bool=false)
+    return CPTPerturbation(TBA(Generator(bonds, hilbert, quadratic(OneOrMore(terms)); half=false)), periodic)
 end
 
 """
     VCAPerturbation{V<:TBA, W<:TBA} <: Perturbation
 
 VCA (Variational Cluster Approach) perturbation containing both intercluster quadratic terms and Weiss field terms of a system.
+
+When `periodic` is `true`, the intercluster terms are also subtracted as a momentum-independent real-space matrix (like the Weiss terms), so that they can be included in the impurity solver as periodic boundary conditions of the cluster without changing the total Hamiltonian.
 """
 struct VCAPerturbation{V<:TBA, W<:TBA} <: Perturbation
     intercluster::V
     weiss::W
-    function VCAPerturbation(intercluster::TBA, weiss::TBA)
+    periodic::Bool
+    function VCAPerturbation(intercluster::TBA, weiss::TBA, periodic::Bool=false)
         @assert kind(intercluster)==kind(weiss) "VCAPerturbation error: mismatched TBAKind for intercluster and weiss subsystem."
-        new{typeof(intercluster), typeof(weiss)}(intercluster, weiss)
+        new{typeof(intercluster), typeof(weiss)}(intercluster, weiss, periodic)
     end
 end
 @inline kind(::Type{<:VCAPerturbation{V}}) where {V<:TBA} = kind(V)
@@ -120,40 +131,45 @@ end
     return perturbation
 end
 @inline function (perturbation::VCAPerturbation)(k::Union{AbstractVector{<:Number}, Nothing}=nothing)
-    return matrix(perturbation.intercluster, k) - matrix(perturbation.weiss)
+    result = matrix(perturbation.intercluster, k) - matrix(perturbation.weiss)
+    perturbation.periodic && (result -= matrix(perturbation.intercluster))
+    return result
 end
 
 """
-    Perturbation(intercluster::TBA, weiss::TBA) -> VCAPerturbation
+    Perturbation(intercluster::TBA, weiss::TBA; periodic::Bool=false) -> VCAPerturbation
     Perturbation(
         lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term};
-        neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss))
+        neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss)), periodic::Bool=false
     ) -> VCAPerturbation
     Perturbation(
-        bonds₁::AbstractVector{<:Bond}, bonds₂::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term}
+        bonds₁::AbstractVector{<:Bond}, bonds₂::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term};
+        periodic::Bool=false
     ) -> VCAPerturbation
 
 Construct a VCA perturbation from pre-built `TBA` objects, or from lattice/hilbert/terms/weiss terms, or from separated bonds.
+
+`periodic=true` indicates that the intercluster terms are also present in the impurity solver as periodic boundary conditions of the cluster, so that they are subtracted as a momentum-independent real-space matrix.
 """
-@inline Perturbation(intercluster::TBA, weiss::TBA) = VCAPerturbation(intercluster, weiss)
+@inline Perturbation(intercluster::TBA, weiss::TBA; periodic::Bool=false) = VCAPerturbation(intercluster, weiss, periodic)
 @inline function Perturbation(
     lattice::AbstractLattice, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term};
-    neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss))
+    neighbors::Union{Int, Neighbors}=max(nneighbor(terms), nneighbor(weiss)), periodic::Bool=false
 )
     bonds₀ = bonds(lattice, neighbors)
     bonds₁, bonds₂ = eltype(bonds₀)[], eltype(bonds₀)[]
     for bond in bonds₀
         isintracell(bond) ? push!(bonds₂, bond) : push!(bonds₁, bond)
     end
-    return Perturbation(bonds₁, bonds₂, hilbert, terms, weiss)
+    return Perturbation(bonds₁, bonds₂, hilbert, terms, weiss; periodic)
 end
-function Perturbation(bonds₁::AbstractVector{<:Bond}, bonds₂::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term})
+function Perturbation(bonds₁::AbstractVector{<:Bond}, bonds₂::AbstractVector{<:Bond}, hilbert::Hilbert, terms::OneOrMore{Term}, weiss::OneOrMore{Term}; periodic::Bool=false)
     terms = quadratic(OneOrMore(terms))
     weiss = quadratic(OneOrMore(weiss))
     kind = TBAKind(typeof((terms..., weiss...)), valtype(hilbert))
     H = Generator(bonds₁, hilbert, terms; half=false)
     W = Generator(bonds₂, hilbert, weiss; half=false)
-    return VCAPerturbation(TBA{typeof(kind)}(H), TBA{typeof(kind)}(W))
+    return VCAPerturbation(TBA{typeof(kind)}(H), TBA{typeof(kind)}(W), periodic)
 end
 
 """
