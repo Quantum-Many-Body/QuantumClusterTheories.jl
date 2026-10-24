@@ -1,4 +1,5 @@
-using LinearAlgebra: I, axpby!, dot, inv!, logabsdet, lu!, mul!, tr
+using LinearAlgebra: Diagonal, I, axpby!, dot, inv!, logabsdet, lu!, mul!, tr
+using Roots: Brent, find_zero
 using TimerOutputs: TimerOutput
 using Optim: LBFGS, Options, optimize
 using QuadGK: quadgk
@@ -343,11 +344,11 @@ end
 @inline factor(::TBAKind{:BdG}) = 2
 
 """
-    expectation(qct::Algorithm{<:QCT}, m::Union{AbstractMatrix{<:Number}, Function, Symbol}; kwargs...) -> Float64
+    expectation(qct::Algorithm{<:QCT}, m::Union{AbstractMatrix{<:Number}, Function, Symbol}; kwargs...) -> ComplexF64
     expectation(
         qct::QCT, m::Union{AbstractMatrix{<:Number}, Function, Symbol};
         brillouinzone::BrillouinZone=BrillouinZone(qct.lattice, 100), μ::Real=0.0, p::Real=1.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
-    ) -> Float64
+    ) -> ComplexF64
 
 Compute the expectation value of an operator `m` (matrix, or function of `k`, or the symbol specifies the Weiss term in VCA) over the quantum cluster theory system by integrating over the Brillouin zone and frequency.
 
@@ -384,6 +385,74 @@ function expectation(
 end
 @inline _matrix_(m::AbstractMatrix{<:Number}, ::AbstractVector{<:Number}) = m
 @inline _matrix_(m::Function, k::AbstractVector{<:Number}) = m(k)::AbstractMatrix{<:Number}
+
+"""
+    filling(qct::Algorithm{<:QCT}; kwargs...) -> Float64
+    filling(
+        qct::QCT;
+        brillouinzone::BrillouinZone=BrillouinZone(qct.lattice, 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
+    ) -> Float64
+
+Compute the filling (particle number per lattice site, summed over spins and orbitals) of a quantum cluster theory system at the given chemical potential `μ`. For superconducting (BdG) systems, only the particle (annihilation) sector of the Nambu space is counted, so no double counting occurs.
+
+The chemical potential enters by shifting the frequency argument of the impurity solver's Green's function, so it is *additional* to any chemical potential term already present in the Hamiltonian, and changing it does not require re-diagonalization.
+
+Within the fixed quantum-number sector of the impurity solver, this shift is exact for normal systems: the particle number is a good quantum number, so `-μN` is a constant of each sector and only translates the excitation energies without touching the eigenstates. For superconducting (BdG) systems, however, the particle number fluctuates, and the shift amounts to a frozen-eigenstate approximation: the quasiparticle energies are translated while the condensate is kept fixed, although the true eigenstate would readjust with `μ`. In this case, the chemical potential should be put in the Hamiltonian (e.g. an `Onsite(:μ, ...)` term) and the impurity solver re-diagonalized by `update!` instead.
+"""
+@inline filling(qct::Algorithm{<:QCT}; kwargs...) = filling(qct.frontend; kwargs...)
+function filling(qct::QCT; brillouinzone::BrillouinZone=BrillouinZone(qct.lattice, 100), μ::Real=0.0, atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6)
+    return real(expectation(qct, numbermatrix(qct); brillouinzone, μ, atol, rtol, maxevals))::Float64
+end
+# The single-particle number operator as a matrix in the Green's function representation: the basis is ordered by the quadraticization table of the perturbation, and for BdG the projector onto the particle (annihilation) sector of the Nambu space is used to avoid double counting.
+function numbermatrix(qct::QCT)
+    ops = operators(kind(qct.perturbation), qct.lattice, qct.perturbation.intercluster.system.hilbert, qct.perturbation.intercluster.quadraticization.table)
+    return Diagonal(map(op->isannihilation(op.index.internal) ? 1.0 : 0.0, ops))
+end
+
+"""
+    chemicalpotential(qct::Algorithm{<:QCT}, n::Real; kwargs...) -> Float64
+    chemicalpotential(
+        qct::QCT, n::Real;
+        bracket::Union{Nothing, Tuple{Real, Real}}=nothing, xatol::Real=1e-6, xrtol::Real=1e-6,
+        brillouinzone::BrillouinZone=BrillouinZone(qct.lattice, 100), atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
+    ) -> Float64
+
+Find the chemical potential `μ` at which the filling of a quantum cluster theory system is `n`, by a bracketed root search (Brent's method) on the monotone function `filling(qct; μ)-n`.
+
+The returned chemical potential is *additional* to any chemical potential term already present in the Hamiltonian (see [`filling`](@ref)). Since the filling is monotone non-decreasing in `μ`, the search is globally convergent; when `n` sits on a gapped plateau, a value within the plateau is returned, which is physically correct as the chemical potential is not uniquely determined inside a gap. The frozen-eigenstate caveat of [`filling`](@ref) for BdG systems applies to the returned value as well. The bracket is found automatically by interval doubling unless explicitly provided. `xatol` and `xrtol` control the tolerance on `μ`, while the remaining keywords are passed to [`filling`](@ref).
+"""
+@inline chemicalpotential(qct::Algorithm{<:QCT}, n::Real; kwargs...) = chemicalpotential(qct.frontend, n; kwargs...)
+function chemicalpotential(
+    qct::QCT, n::Real;
+    bracket::Union{Nothing, Tuple{Real, Real}}=nothing, xatol::Real=1e-6, xrtol::Real=1e-6,
+    brillouinzone::BrillouinZone=BrillouinZone(qct.lattice, 100), atol::Real=1e-6, rtol::Real=1e-6, maxevals::Int=10^6
+)
+    nmax = tr(numbermatrix(qct))/length(qct.lattice)
+    0<n<nmax || error("chemicalpotential error: target filling $n is out of the physical range (0, $nmax).")
+    f(μ::Real) = filling(qct; μ=μ, brillouinzone, atol, rtol, maxevals)-n
+    (lo, hi) = isnothing(bracket) ? _bracket_(f) : bracket
+    lo==hi && return float(lo)
+    return find_zero(f, (float(lo), float(hi)), Brent(); xatol=xatol, xrtol=xrtol)::Float64
+end
+# Bracket a sign change of the monotone non-decreasing function `f` by doubling an initial symmetric interval.
+# A degenerate bracket `(μ, μ)` is returned when `f(μ)==0` is hit at an endpoint, which the caller handles.
+function _bracket_(f::Function)
+    lo, hi = -1.0, 1.0
+    flo, fhi = f(lo), f(hi)
+    for _ in 1:32
+        flo==0 && return (lo, lo)
+        fhi==0 && return (hi, hi)
+        flo<0<fhi && return (lo, hi)
+        if flo>0
+            lo *= 2
+            flo = f(lo)
+        else
+            hi *= 2
+            fhi = f(hi)
+        end
+    end
+    error("chemicalpotential error: failed to bracket the target filling automatically; please provide an explicit `bracket`.")
+end
 
 """
     optimize!(vca::Algorithm{<:VCA}; kwargs...)

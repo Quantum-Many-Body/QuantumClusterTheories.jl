@@ -1,5 +1,5 @@
 using ExactDiagonalization
-using LinearAlgebra: I, dot, inv, tr
+using LinearAlgebra: I, dot, eigen, inv, tr
 using QuantumClusterTheories
 using QuantumLattices
 using TightBindingApproximation
@@ -248,6 +248,8 @@ end
     ]
     @test isapprox(expectation(vca, M), -0.80705; atol=1e-4)
     @test isapprox(expectation(vca, :m), -0.80705; atol=1e-4)
+    # half-filling pinned by particle-hole symmetry (μ=-U/2 already in the Hamiltonian, so the keyword μ is left at 0)
+    @test isapprox(filling(vca), 1.0; atol=1e-3)
 
     # vs = LinRange(0.0, 0.3, 31)
     # result = zeros(length(vs))
@@ -381,4 +383,55 @@ end
         @test velocity(tba, k, 1)==velocity(ref, k, 1)
         @test velocity(tba, k, 2)==velocity(ref, k, 2)
     end
+end
+
+@testset "Filling-TBA" begin
+    # Free 1D chain with a μ-free Hamiltonian: within the fixed particle-number sector of the impurity solver the keyword-μ shift is exact, so the filling and its inverse coincide with the analytic n = 2k_F/π and μ = -2cos(πn/2) of ε_k = -2cos(k), up to the discretization of the momentum grid.
+    unitcell = Lattice([0.0]; vectors=[[1.0]])
+    lattice = Lattice(unitcell, (10,), ('P',))
+    hilbert = Hilbert(Fock{:f}(1, 2), length(lattice))
+    cpt = Algorithm(:FreeChain, CPT(unitcell, lattice, hilbert, (Hopping(:t, -1.0, 1),), ℕ(length(lattice)) ⊠ 𝕊ᶻ(0), BandLanczosMethod()))
+    bz = BrillouinZone(lattice, 1000)
+
+    μ = 0.3
+    @test isapprox(filling(cpt; μ=μ, brillouinzone=bz), 2*acos(-μ/2)/π; atol=1e-3)
+
+    n = 0.7
+    μ′ = chemicalpotential(cpt, n; brillouinzone=bz)
+    @test isapprox(μ′, -2*cos(π*n/2); atol=2e-3)
+    @test isapprox(filling(cpt; μ=μ′, brillouinzone=bz), n; atol=1e-3)
+end
+
+@testset "Filling-BdG" begin
+    # Quadratic BdG chain (μ in the Hamiltonian): exact for any cluster size since the Hamiltonian is quadratic.
+    # At the particle-hole symmetric point μ=0 the filling is pinned to 1; away from it the filling coincides with the occupation of the negative-energy states of the exact lattice BdG Hamiltonian, which confirms the particle-sector projector in the Nambu space.
+    unitcell = Lattice([0.0]; vectors=[[1.0]])
+    lattice = Lattice(unitcell, (4,), ('P',))
+    hilbert = Hilbert(Fock{:f}(1, 2), length(lattice))
+    hilbert′ = Hilbert(Fock{:f}(1, 2), length(unitcell))
+
+    Δ = 0.4
+    function chain(μ::Real)
+        terms = (Hopping(:t, -1.0, 1), Onsite(:μ, -μ), Pairing(:Δ, Δ, 1, 𝕔𝕔(:, :, real(1im*σʸ))))
+        return Algorithm(Symbol("BdGChain-$μ"), CPT(unitcell, lattice, hilbert, terms, 𝕊ᶻ(0), BandLanczosMethod()))
+    end
+
+    bz = BrillouinZone(lattice, 1000)
+    cpt = chain(0.0)
+    # the projector must follow the same single-particle basis ordering as the solver's Green's function (nonuniform only for BdG)
+    @test QuantumClusterTheories.numbermatrix(cpt.frontend).diag == map(op->isannihilation(op.index.internal) ? 1.0 : 0.0, cpt.frontend.solver.operators)
+    @test isapprox(filling(cpt; brillouinzone=bz), 1.0; atol=5e-4)
+
+    function reference(μ::Real)
+        terms = (Hopping(:t, -1.0, 1), Onsite(:μ, -μ), Pairing(:Δ, Δ, 1, 𝕔𝕔(:, :, real(1im*σʸ))))
+        tba = TBA(unitcell, hilbert′, terms)
+        particle = map(op->isannihilation(op.index.internal), operators(Fermionic(:BdG), unitcell, hilbert′))
+        ks = range(-π, π; length=4001)
+        return sum(ks[1:end-1]) do k
+            values, vectors = eigen(matrix(tba, [k]).H)
+            sum(abs2, vectors[particle, values.<0])
+        end/4000
+    end
+    cpt = chain(0.5)
+    @test isapprox(filling(cpt; brillouinzone=bz), reference(0.5); atol=1e-6)
 end
