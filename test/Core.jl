@@ -88,6 +88,11 @@ end
     spectra = cpt(:EB, DynamicalSpectra(path, es; η=0.1))
     Plots.savefig(Plots.plot(spectra), "Plots-Hubbard-Square-2x2-spectral.png")
     Makie.save("Makie-Hubbard-Square-2x2-spectral.png", Makie.plot(spectra))
+
+    # a single-group dynamical-spectra assignment is drawn as one heatmap, so it can be overlaid onto an existing plot (e.g. with the bare bands, as in the La₃Ni₂O₇ example)
+    plt = Plots.plot()
+    Plots.plot!(plt, spectra)
+    Plots.savefig(plt, "Plots-Hubbard-Square-2x2-spectral-overlay.png")
 end
 
 @testset "Square-Hubbard-DOS" begin
