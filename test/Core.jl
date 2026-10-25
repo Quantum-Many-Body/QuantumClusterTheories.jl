@@ -66,6 +66,7 @@ import Plots
     @test derivative(solver, ω′) ≈ -inv(ω′*I-m)^2
 
     cpt = Algorithm(:Square, CPT(unitcell, lattice, hilbert, terms, quantumnumber))
+    @test dimension(cpt) == dimension(cpt.frontend) == 2
     @test cpt(ω, k) ≈ inv(ω*I-[2cos(k[1])+2cos(k[2]) 0; 0 2cos(k[1])+2cos(k[2])])
     @test isapprox(Ω(cpt), -1.6210722; atol=1e-6)
 end
@@ -87,6 +88,91 @@ end
     spectra = cpt(:EB, DynamicalSpectra(path, es; η=0.1))
     Plots.savefig(Plots.plot(spectra), "Plots-Hubbard-Square-2x2-spectral.png")
     Makie.save("Makie-Hubbard-Square-2x2-spectral.png", Makie.plot(spectra))
+end
+
+@testset "Square-Hubbard-DOS" begin
+    unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
+    lattice = Lattice(unitcell, (2, 2), ('P', 'P'))
+    hilbert = Hilbert(site=>Fock{:f}(1, 2) for site in eachindex(lattice))
+    t = Hopping(:t, -1.0, 1)
+    U = Hubbard(:U, 8.0)
+    μ = Onsite(:μ, -U.value/2)
+    quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
+    cpt = Algorithm(:SquareHubbard, CPT(unitcell, lattice, hilbert, (t, μ, U), quantumnumber))
+
+    es = LinRange(-10.0, 10.0, 501)
+    bz = BrillouinZone(unitcell, 20)
+    # the QCT-style constructor translates to the shared TBA representation: bands=: and (fwhm, ne, emin, emax)=(2η, length, first, last)
+    task = DensityOfStates(bz, es, [1], [2], :; η=0.1)
+    @test task.bands isa Colon && task.fwhm==0.2 && task.ne==501 && task.emin==-10.0 && task.emax==10.0
+    dos = cpt(:DOS, task)
+    spectra = cpt(:EB, DynamicalSpectra(bz, es; η=0.1))
+
+    # the single-particle basis is ordered as [𝕔(1,1,-1//2), 𝕔(1,1,1//2)], so [1]/[2] are the spin-down/up projections
+    @test dos.data.values[:, 1] ≈ dos.data.values[:, 2]
+    @test dos.data.values[:, 1] + dos.data.values[:, 2] ≈ dos.data.values[:, 3]
+    # the total DOS is the momentum average of the dynamical spectra over the same Brillouin zone, binned
+    @test dos.data.values[:, 3] ≈ vec(sum(spectra.data.values; dims=2))*step(es)/length(bz)
+
+    # constructor-time validation of the energy grid and broadening
+    @test_throws ErrorException DensityOfStates(bz, [0.0])
+    @test_throws ErrorException DensityOfStates(bz, LinRange(10.0, -10.0, 100))
+    @test_throws ErrorException DensityOfStates(bz, [0.0, 1.0, 1.5, 3.0])
+    @test_throws ErrorException DensityOfStates(bz, es; η=0.0)
+    @test_throws ErrorException DensityOfStates(bz, es; η=-0.1)
+    # run-time validation of tasks built with the plain TBA constructor, and of run-time options
+    @test_throws AssertionError cpt(:DOSband, DensityOfStates(bz, [1], :; ne=501, emin=-10.0, emax=10.0))
+    @test_throws ErrorException cpt(:DOSnan, DensityOfStates(bz; ne=501))
+    @test_throws ErrorException cpt(:DOSrange, DensityOfStates(bz, :, [3]; ne=501, emin=-10.0, emax=10.0))
+    @test_throws ErrorException cpt(:DOSempty, DensityOfStates(bz, :, Int[]; ne=501, emin=-10.0, emax=10.0))
+    @test_throws ErrorException cpt(:DOSopt, DensityOfStates(bz, es, :; η=0.1); gauge=:icoordinate)
+
+    Plots.savefig(Plots.plot(dos), "Plots-Hubbard-Square-2x2-dos.png")
+    Makie.save("Makie-Hubbard-Square-2x2-dos.png", Makie.plot(dos))
+end
+
+@testset "Square-Hubbard-SpectralSurface" begin
+    unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
+    lattice = Lattice(unitcell, (2, 2), ('P', 'P'))
+    hilbert = Hilbert(site=>Fock{:f}(1, 2) for site in eachindex(lattice))
+    t = Hopping(:t, -1.0, 1)
+    U = Hubbard(:U, 8.0)
+    μ = Onsite(:μ, -U.value/2)
+    quantumnumber = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
+    cpt = Algorithm(:SquareHubbard, CPT(unitcell, lattice, hilbert, (t, μ, U), quantumnumber))
+
+    bz = BrillouinZone(unitcell, 20)
+    ω, η = 0.5, 0.1
+    ss = cpt(:SS, DynamicalSpectra(bz, ω, [1], [2], :; η=η))
+    spectra = cpt(:EB, DynamicalSpectra(bz, [ω]; η=η))
+
+    # the single-particle basis is ordered as [𝕔(1,1,-1//2), 𝕔(1,1,1//2)], so [1]/[2] are the spin-down/up projections
+    @test size(ss.data.values)==(1, 400, 3)
+    @test ss.data.values[1, :, 1] ≈ ss.data.values[1, :, 2]
+    @test ss.data.values[1, :, 1] + ss.data.values[1, :, 2] ≈ ss.data.values[1, :, 3]
+    # the single-energy and multi-energy constructors are two paths to the same measurement
+    @test ss.data.values[:, :, 3] ≈ spectra.data.values[:, :, 1]
+
+    # constructor-time and run-time validation
+    @test_throws ErrorException DynamicalSpectra(bz, ω; η=0.0)
+    @test_throws ErrorException DynamicalSpectra(bz, ω; η=-0.1)
+    @test_throws ErrorException DynamicalSpectra(bz, [ω, 2ω]; η=0.0)
+    @test_throws ErrorException cpt(:SSrange, DynamicalSpectra(bz, ω, [3]; η=η))
+    @test_throws ErrorException cpt(:SSempty, DynamicalSpectra(bz, ω, Int[]; η=η))
+    # DynamicalSpectra declares no run-time options, so improper ones are rejected by the framework
+    @test_throws AssertionError cpt(:SSopt, DynamicalSpectra(bz, ω; η=η); gauge=:icoordinate)
+
+    # single-energy spectra on a one-dimensional Brillouin zone are computable, but cannot be visualized as a surface
+    unitcell₁ = Lattice([0.0]; vectors=[[1.0]])
+    chain = Lattice(unitcell₁, (10,), ('P',))
+    cpt₁ = Algorithm(:ChainSS, CPT(unitcell₁, chain, Hilbert(Fock{:f}(1, 2), length(chain)), (Hopping(:t, -1.0, 1),), ℕ(length(chain)) ⊠ 𝕊ᶻ(0), BandLanczosMethod()))
+    ss₁ = cpt₁(:SS1d, DynamicalSpectra(BrillouinZone(unitcell₁, 20), ω; η=η))
+    @test size(ss₁.data.values)==(1, 20, 1)
+    @test_throws ErrorException Plots.plot(ss₁)
+    @test_throws ErrorException Makie.plot(ss₁)
+
+    Plots.savefig(Plots.plot(ss), "Plots-Hubbard-Square-2x2-spectral-surface.png")
+    Makie.save("Makie-Hubbard-Square-2x2-spectral-surface.png", Makie.plot(ss))
 end
 
 @testset "PBC cluster" begin
@@ -434,4 +520,109 @@ end
     end
     cpt = chain(0.5)
     @test isapprox(filling(cpt; brillouinzone=bz), reference(0.5); atol=1e-6)
+end
+
+@testset "FreeChain-DOS" begin
+    # Free 1D chain: CPT is exact, so the density of states coincides with the analytic Lorentzian-broadened reference of εₖ = -2cos(k).
+    unitcell = Lattice([0.0]; vectors=[[1.0]])
+    lattice = Lattice(unitcell, (10,), ('P',))
+    hilbert = Hilbert(Fock{:f}(1, 2), length(lattice))
+    cpt = Algorithm(:FreeChainDOS, CPT(unitcell, lattice, hilbert, (Hopping(:t, -1.0, 1),), ℕ(length(lattice)) ⊠ 𝕊ᶻ(0), BandLanczosMethod()))
+
+    bz = BrillouinZone(unitcell, 200)
+    es = LinRange(-4.0, 4.0, 401)
+    η = 0.025
+    dos = cpt(:DOS, DensityOfStates(bz, es; η=η))
+    ref = [mapreduce(k->2η/((ω+2cos(k[1]))^2+η^2), +, bz)*step(es)/(π*length(bz)) for ω in es]
+    @test dos.data.values[:, 1] ≈ ref
+    # the kernel is normalized: the binned values sum to the number of generalized orbitals (2 spins), up to the Lorentzian tails outside the energy window
+    @test isapprox(sum(dos.data.values[:, 1]), mapreduce(k->2(atan((4+2cos(k[1]))/η)+atan((4-2cos(k[1]))/η))/π, +, bz)/length(bz); atol=1e-3)
+
+    # the same task can also run on a tight-binding algorithm (with the Gaussian broadening kernel of the same fwhm)
+    tba = Algorithm(:FreeChainTBA, TBA(unitcell, Hilbert(Fock{:f}(1, 2), length(unitcell)), Hopping(:t, -1.0, 1)))
+    dos′ = tba(:DOS, DensityOfStates(bz, es; η=η))
+    @test size(dos′.data.values)==(length(es), 1)
+    @test isapprox(sum(dos′.data.values[:, 1]), 2.0; atol=1e-2)
+end
+
+@testset "BdGChain-DOS" begin
+    # Quadratic BdG chain: exact for CPT. The single-particle basis is ordered with the particle (annihilation) sector first, so [1, 2] and [3, 4] are the particle and hole sectors of the Nambu space.
+    unitcell = Lattice([0.0]; vectors=[[1.0]])
+    lattice = Lattice(unitcell, (4,), ('P',))
+    hilbert = Hilbert(Fock{:f}(1, 2), length(lattice))
+    hilbert′ = Hilbert(Fock{:f}(1, 2), length(unitcell))
+    terms = (Hopping(:t, -1.0, 1), Onsite(:μ, -0.5), Pairing(:Δ, 0.4, 1, 𝕔𝕔(:, :, real(1im*σʸ))))
+    cpt = Algorithm(:BdGChainDOS, CPT(unitcell, lattice, hilbert, terms, 𝕊ᶻ(0), BandLanczosMethod()))
+
+    bz = BrillouinZone(unitcell, 100)
+    es = LinRange(-4.0, 4.0, 401)
+    η = 0.025
+    dos = cpt(:DOS, DensityOfStates(bz, es, [1, 2], [3, 4], :; η=η))
+    @test dos.data.values[:, 1] + dos.data.values[:, 2] ≈ dos.data.values[:, 3]
+
+    # the particle-sector DOS coincides with the direct diagonalization of the BdG Bloch Hamiltonian
+    tba = TBA(unitcell, hilbert′, terms)
+    ref = zeros(length(es))
+    for k in bz
+        values, vectors = eigen(matrix(tba, k).H)
+        for n in eachindex(values)
+            w = abs2(vectors[1, n]) + abs2(vectors[2, n])
+            @. ref += w*η/((es-values[n])^2+η^2)
+        end
+    end
+    ref .*= step(es)/(π*length(bz))
+    @test dos.data.values[:, 1] ≈ ref
+end
+
+@testset "FreeSquare-SpectralSurface" begin
+    # Free 2D square lattice: CPT is exact, so the single-energy dynamical spectra (i.e., the spectral surface) coincide with the analytic Lorentzian-broadened reference of εₖ = -2(cos kx + cos ky). A non-square Brillouin zone is used to pin down the (1, nk, ngroups) layout of the values.
+    unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
+    lattice = Lattice(unitcell, (2, 2), ('P', 'P'))
+    hilbert = Hilbert(Fock{:f}(1, 2), length(lattice))
+    cpt = Algorithm(:FreeSquareSS, CPT(unitcell, lattice, hilbert, (Hopping(:t, -1.0, 1),), ℕ(length(lattice)) ⊠ 𝕊ᶻ(0), BandLanczosMethod()))
+
+    bz = BrillouinZone(unitcell, (8, 6))
+    ω, η = 0.7, 0.05
+    ss = cpt(:SS, DynamicalSpectra(bz, ω; η=η))
+    @test size(ss.data.values)==(1, 48, 1)
+    ref = [2η/((ω+2cos(k[1])+2cos(k[2]))^2+η^2)/π for k in bz]
+    @test vec(ss.data.values) ≈ ref
+
+    # a reciprocal zone beyond the first Brillouin zone is also supported, both for the computation and for the visualization
+    rz = ReciprocalZone(unitcell, [-1.0=>1.0, -1.0=>1.0]; length=200, ends=(true, true))
+    ss′ = cpt(:SSrz, DynamicalSpectra(rz, ω, [1], [2]; η=η))
+    @test size(ss′.data.values)==(1, 40000, 2)
+    ref′ = [η/((ω+2cos(k[1])+2cos(k[2]))^2+η^2)/π for k in rz]
+    @test ss′.data.values[1, :, 1] ≈ ss′.data.values[1, :, 2]
+    @test vec(ss′.data.values[:, :, 1]) ≈ ref′
+    Plots.savefig(Plots.plot(ss′), "Plots-FreeSquare-spectral-surface-rz.png")
+    Makie.save("Makie-FreeSquare-spectral-surface-rz.png", Makie.plot(ss′))
+end
+
+@testset "BdGSquare-SpectralSurface" begin
+    # Quadratic BdG square lattice: exact for CPT. The single-particle basis is ordered with the particle (annihilation) sector first, so [1, 2] and [3, 4] are the particle and hole sectors of the Nambu space.
+    unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0], [0.0, 1.0]])
+    lattice = Lattice(unitcell, (2, 2), ('P', 'P'))
+    hilbert = Hilbert(Fock{:f}(1, 2), length(lattice))
+    hilbert′ = Hilbert(Fock{:f}(1, 2), length(unitcell))
+    terms = (Hopping(:t, -1.0, 1), Onsite(:μ, -0.5), Pairing(:Δ, 0.4, 1, 𝕔𝕔(:, :, real(1im*σʸ))))
+    cpt = Algorithm(:BdGSquareSS, CPT(unitcell, lattice, hilbert, terms, 𝕊ᶻ(0), BandLanczosMethod()))
+
+    bz = BrillouinZone(unitcell, (6, 4))
+    ω, η = 0.3, 0.05
+    ss = cpt(:SS, DynamicalSpectra(bz, ω, [1, 2], [3, 4], :; η=η))
+    @test size(ss.data.values)==(1, 24, 3)
+    @test ss.data.values[1, :, 1] + ss.data.values[1, :, 2] ≈ ss.data.values[1, :, 3]
+
+    # the particle-sector spectral surface coincides with the direct diagonalization of the BdG Bloch Hamiltonian
+    tba = TBA(unitcell, hilbert′, terms)
+    ref = zeros(length(bz))
+    for (j, k) in enumerate(bz)
+        values, vectors = eigen(matrix(tba, k).H)
+        for n in eachindex(values)
+            w = abs2(vectors[1, n]) + abs2(vectors[2, n])
+            ref[j] += w*η/((ω-values[n])^2+η^2)
+        end
+    end
+    @test ss.data.values[1, :, 1] ≈ ref/π
 end

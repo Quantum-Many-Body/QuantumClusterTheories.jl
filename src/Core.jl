@@ -8,8 +8,8 @@ using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubor
 using StaticArrays: SVector
 using TightBindingApproximation: TBAKind
 
-import QuantumLattices: Parameters, dependencytypes, kind, matrix, options, run!, update!
-import TightBindingApproximation: TBA
+import QuantumLattices: Parameters, dependencytypes, dimension, kind, matrix, options, run!, update!
+import TightBindingApproximation: DensityOfStates, DensityOfStatesData, TBA
 import TightBindingApproximation.Fitting: optimize!
 
 """
@@ -267,6 +267,14 @@ end
 end
 
 """
+    dimension(qct::Union{QCT, Algorithm{<:QCT}}) -> Int
+
+Get the dimension of the single-particle basis of the periodized Green's function.
+"""
+@inline dimension(qct::Algorithm{<:QCT}) = dimension(qct.frontend)
+@inline dimension(qct::QCT) = length(operators(kind(qct.perturbation), qct.unitcell, qct.perturbation.intercluster.system.hilbert, qct.perturbation.intercluster.quadraticization.table))
+
+"""
     CPT{U<:AbstractLattice, L<:AbstractLattice, I<:ImpuritySolver, V<:CPTPerturbation, P<:Periodization}
 
 Alias for [`QCT`](@ref) with `V<:CPTPerturbation`, representing cluster perturbation theory.
@@ -385,6 +393,16 @@ function expectation(
 end
 @inline _matrix_(m::AbstractMatrix{<:Number}, ::AbstractVector{<:Number}) = m
 @inline _matrix_(m::Function, k::AbstractVector{<:Number}) = m(k)::AbstractMatrix{<:Number}
+# Compute `tr(A*B)` without forming the product matrix
+@inline function trprod(A::AbstractMatrix, B::AbstractMatrix)
+    n = size(A, 1)
+    @assert n==size(A, 2)==size(B, 1)==size(B, 2)
+    s = zero(promote_type(eltype(A), eltype(B)))
+    @inbounds for j in 1:n, i in 1:n
+        s += A[i, j]*B[j, i]
+    end
+    return s
+end
 
 """
     filling(qct::Algorithm{<:QCT}; kwargs...) -> Float64
@@ -487,65 +505,147 @@ function optimize!(
 end
 
 """
-    trprod(A::AbstractMatrix, B::AbstractMatrix) -> Number
+    DynamicalSpectra{R<:ReciprocalSpace, E<:Union{Float64, Vector{Float64}}, L<:Tuple{Vararg{Union{Colon, AbstractVector{Int}}}}, F<:Function}
 
-Compute `tr(A*B)` without forming the product matrix.
+Dynamical spectra: the spectral function on a reciprocal space, optionally projected onto sets of generalized orbitals.
 """
-@inline function trprod(A::AbstractMatrix, B::AbstractMatrix)
-    n = size(A, 1)
-    @assert n==size(A, 2)==size(B, 1)==size(B, 2)
-    s = zero(promote_type(eltype(A), eltype(B)))
-    @inbounds for j in 1:n, i in 1:n
-        s += A[i, j]*B[j, i]
-    end
-    return s
-end
-
-"""
-    DynamicalSpectra{R<:ReciprocalSpace, F<:Function}
-
-Dynamical spectra.
-"""
-struct DynamicalSpectra{R<:ReciprocalSpace, F<:Function}
+struct DynamicalSpectra{R<:ReciprocalSpace, E<:Union{Float64, Vector{Float64}}, L<:Tuple{Vararg{Union{Colon, AbstractVector{Int}}}}, F<:Function}
     reciprocalspace::R
-    energies::Vector{Float64}
+    energies::E
     η::Float64
+    orbitals::L
     rescale::F
-    function DynamicalSpectra(reciprocalspace::ReciprocalSpace, energies::AbstractVector{<:Real}; η::Real=0.1, rescale::Function=identity)
-        return new{typeof(reciprocalspace), typeof(rescale)}(reciprocalspace, collect(Float64, energies), convert(Float64, η), rescale)
-    end
 end
 @inline dependencytypes(::Type{<:DynamicalSpectra}) = ()
 
 """
-    DynamicalSpectraData{R<:ReciprocalSpace} <: Data
+    DynamicalSpectra(reciprocalspace::ReciprocalSpace, energies::AbstractVector{<:Real}, orbitals::Union{Colon, AbstractVector{Int}}...=:; η::Real=0.1, rescale::Function=identity)
+    DynamicalSpectra(reciprocalspace::ReciprocalSpace, energy::Real, orbitals::Union{Colon, AbstractVector{Int}}...=:; η::Real=0.1, rescale::Function=identity)
+
+Construct a dynamical-spectra task. The computed values are
+
+    values[i, j, g] = rescale(-(1/π) Im Tr[P₍g₎ G(ωᵢ+iη, kⱼ)]),
+
+where `G(ω,k) = U(k) inv(G⁻¹(ω+iη)-V(k)) U(k)'` is the periodized Green's function and `P₍g₎` the projector onto the `g`-th set of generalized orbitals. Each `orbitals` specifies one set of generalized orbitals, i.e., the integer positions in the single-particle basis of the periodized Green's function, and `:` selects all of them.
+
+With a single `energy` (the second constructor), the result is the spectral surface at that energy, in particular the Fermi surface of an interacting system when `energy=μ`, which can be visualized as heatmaps on a two-dimensional Brillouin/reciprocal zone.
+"""
+function DynamicalSpectra(reciprocalspace::ReciprocalSpace, energies::AbstractVector{<:Real}, orbitals::Union{Colon, AbstractVector{Int}}...=:; η::Real=0.1, rescale::Function=identity)
+    η>0 || error("DynamicalSpectra error: η must be positive.")
+    return DynamicalSpectra(reciprocalspace, collect(Float64, energies), convert(Float64, η), orbitals, rescale)
+end
+function DynamicalSpectra(reciprocalspace::ReciprocalSpace, energy::Real, orbitals::Union{Colon, AbstractVector{Int}}...=:; η::Real=0.1, rescale::Function=identity)
+    η>0 || error("DynamicalSpectra error: η must be positive.")
+    return DynamicalSpectra(reciprocalspace, convert(Float64, energy), convert(Float64, η), orbitals, rescale)
+end
+
+"""
+    DynamicalSpectraData{R<:ReciprocalSpace, E<:Union{Float64, Vector{Float64}}} <: Data
 
 Data of dynamical spectra computed from quantum cluster theory, including:
 
 1) `reciprocalspace::R`: reciprocal space on which the spectra are computed.
-2) `energies::Vector{Float64}`: energy sample points.
-3) `values::Matrix{Float64}`: spectral function A(ω,k) = -Im[Tr[G(ω,k)]] at each energy-momentum point.
+2) `energies::E`: energy sample point(s).
+3) `values::Array{Float64, 3}`: spectral function A(ω,k) = -(1/π) Im Tr[P₍g₎ G(ω+iη, k)] with shape `(length(energies), length(reciprocalspace), ngroups)` (one slice per set of generalized orbitals).
 """
-struct DynamicalSpectraData{R<:ReciprocalSpace} <: Data
+struct DynamicalSpectraData{R<:ReciprocalSpace, E<:Union{Float64, Vector{Float64}}} <: Data
     reciprocalspace::R
-    energies::Vector{Float64}
-    values::Matrix{Float64}
+    energies::E
+    values::Array{Float64, 3}
 end
 function run!(qct::Algorithm{<:QCT}, ds::Assignment{<:DynamicalSpectra})
-    η, rescale = ds.task.η, ds.task.rescale
-    result = zeros(length(ds.task.energies), length(ds.task.reciprocalspace))
-    Vs = [qct.frontend.perturbation(k) for k in ds.task.reciprocalspace]
-    # M = U'*U so that `tr(U*X*U') == tr(X*M)` by the cyclicity of trace, avoiding the U-sandwich per frequency
-    Ms = [(U = matrix(qct.frontend.periodization, k); U'*U) for k in ds.task.reciprocalspace]
+    frontend, task = qct.frontend, ds.task
+    η, rescale, energies = task.η, task.rescale, task.energies
+    norbital = dimension(frontend)
+    groups = map(task.orbitals) do orbitals
+        positions = orbitals isa Colon ? collect(1:norbital) : collect(orbitals)
+        (isempty(positions) || !all(p->1<=p<=norbital, positions)) && error("DynamicalSpectra error: set of generalized orbitals $orbitals is empty or out of the range 1:$norbital.")
+        return positions
+    end
+    Vs = [frontend.perturbation(k) for k in task.reciprocalspace]
+    Us = [matrix(frontend.periodization, k) for k in task.reciprocalspace]
+    result = zeros(length(energies), length(task.reciprocalspace), length(groups))
     buffer = Matrix{ComplexF64}(undef, size(first(Vs)))
-    for (i, ω) in enumerate(ds.task.energies)
-        G⁻¹ = inv(qct.frontend.solver, ω+1im*η)
-        for (j, (V, M)) in enumerate(zip(Vs, Ms))
-            # in-place equivalent of `result[i, j] = rescale(-imag(tr(U*inv(G⁻¹-V)*U')))`
+    T = Matrix{ComplexF64}(undef, (norbital, size(first(Vs), 2)))
+    for (i, ω) in enumerate(energies)
+        G⁻¹ = inv(frontend.solver, ω+1im*η)
+        for (j, (V, U)) in enumerate(zip(Vs, Us))
+            # T = U*G̃ with G̃ = inv(G⁻¹-V): the diagonal of the periodized Green's function G = U*G̃*U' then follows as G[r, r] = Σₙ conj(U[r, n])*T[r, n], so the full matrix G is never formed explicitly
             copyto!(buffer, G⁻¹)
             axpby!(-1, V, 1, buffer)
-            result[i, j] = rescale(-imag(trprod(inv!(lu!(buffer)), M)))
+            mul!(T, U, inv!(lu!(buffer)))
+            for (g, rows) in enumerate(groups)
+                s = zero(ComplexF64)
+                @inbounds for r in rows, n in axes(T, 2)
+                    s += conj(U[r, n])*T[r, n]
+                end
+                result[i, j, g] = rescale(-imag(s)/π)
+            end
         end
     end
-    return DynamicalSpectraData(ds.task.reciprocalspace, ds.task.energies, result)
+    return DynamicalSpectraData(task.reciprocalspace, task.energies, result)
+end
+
+"""
+    DensityOfStates(brillouinzone::BrillouinZone, energies::AbstractVector{<:AbstractFloat}, orbitals::Union{Colon, AbstractVector{Int}}...; η::Real=0.1)
+
+Construct a density-of-states task in the idiom of quantum cluster theories, i.e., with an explicit energy grid and the Lorentzian broadening `η`, instead of the `emin`/`emax`/`ne`/`fwhm` parametrization of the plain `TightBindingApproximation` constructor. The grid must be strictly increasing and uniform, with at least two points. The task is stored in the shared `TightBindingApproximation.DensityOfStates` representation as `ne=length(energies)`, `emin=first(energies)`, `emax=last(energies)` and `fwhm=2η`; since `2η` and `fwhm` are the full widths at half maximum of the Lorentzian and Gaussian broadening kernels of the two frontends, respectively, the same task can be shared between both frontends with the same physical meaning.
+
+Each `orbitals` specifies one set of generalized orbitals, i.e., the integer positions in the single-particle basis of the periodized Green's function, and `:` selects all of them. One column of the resulting `values` is computed per set; with no `orbitals` given, a single all-orbital set is assumed.
+
+On a quantum-cluster-theory frontend, the computed values are
+
+    values[i, g] = -(dE/(πNₖ)) Σₖ Im Tr[P₍g₎ G(ωᵢ+iη, k)],
+
+where `G(ω,k) = U(k) inv(G⁻¹(ω+iη)-V(k)) U(k)'` is the periodized Green's function, `P₍g₎` the projector onto the `g`-th set of generalized orbitals and `dE=(emax-emin)/(ne-1)` the width of the energy bins. As in `TightBindingApproximation`, the kernel is normalized and the values are binned, so that each column sums approximately to the number of selected generalized orbitals (up to the Lorentzian tails outside the energy window).
+
+Compared to the `TightBindingApproximation` frontend, the following restrictions are enforced at run time: `bands` must be `:` (band indices are meaningless for interacting systems), `emin`/`emax` must be finite (they cannot be determined automatically from the non-existent eigenvalues of an interacting system), and no options (`gauge`/`infinitesimal`) are supported.
+"""
+function DensityOfStates(brillouinzone::BrillouinZone, energies::AbstractVector{<:AbstractFloat}, orbitals::Union{Colon, AbstractVector{Int}}...; η::Real=0.1)
+    length(energies)>=2 || error("DensityOfStates error: at least two energy sample points are required.")
+    issorted(energies) && first(energies)<last(energies) || error("DensityOfStates error: energies must be strictly increasing.")
+    if !(energies isa AbstractRange)
+        Δ = diff(energies)
+        all(δ->isapprox(δ, first(Δ); rtol=1e-6), Δ) || error("DensityOfStates error: only uniform energy grids are supported.")
+    end
+    η>0 || error("DensityOfStates error: η must be positive.")
+    return DensityOfStates(brillouinzone, :, orbitals...; fwhm=2η, ne=length(energies), emin=first(energies), emax=last(energies))
+end
+function run!(qct::Algorithm{<:QCT}, dos::Assignment{<:DensityOfStates}; options...)
+    isempty(options) || error("DensityOfStates error: options $(keys(options)) are meaningless for quantum cluster theories.")
+    frontend, task = qct.frontend, dos.task
+    task.bands isa Colon || error("DensityOfStates error: band selection is meaningless for a quantum cluster theory; `bands` must be `:`.")
+    (isnan(task.emin) || isnan(task.emax)) && error("DensityOfStates error: `emin`/`emax` cannot be determined automatically for a quantum cluster theory; please assign finite values.")
+    η = task.fwhm/2
+    energies = LinRange(task.emin, task.emax, task.ne)
+    dE = (task.emax-task.emin)/(task.ne-1)
+    norbital = dimension(frontend)
+    groups = map(task.orbitals) do orbitals
+        positions = orbitals isa Colon ? collect(1:norbital) : collect(orbitals)
+        (isempty(positions) || !all(p->1<=p<=norbital, positions)) && error("DensityOfStates error: set of generalized orbitals $orbitals is empty or out of the range 1:$norbital.")
+        return positions
+    end
+    Vs = [frontend.perturbation(k) for k in task.brillouinzone]
+    Us = [matrix(frontend.periodization, k) for k in task.brillouinzone]
+    nk = length(task.brillouinzone)
+    result = zeros(task.ne, length(groups))
+    buffer = Matrix{ComplexF64}(undef, size(first(Vs)))
+    T = Matrix{ComplexF64}(undef, (norbital, size(first(Vs), 2)))
+    for (i, ω) in enumerate(energies)
+        G⁻¹ = inv(frontend.solver, ω+1im*η)
+        for (j, (V, U)) in enumerate(zip(Vs, Us))
+            # T = U*G̃ with G̃ = inv(G⁻¹-V): the diagonal of the periodized Green's function G = U*G̃*U' then follows as G[r, r] = Σₙ conj(U[r, n])*T[r, n], so the full matrix G is never formed explicitly
+            copyto!(buffer, G⁻¹)
+            axpby!(-1, V, 1, buffer)
+            mul!(T, U, inv!(lu!(buffer)))
+            for (g, rows) in enumerate(groups)
+                s = zero(ComplexF64)
+                @inbounds for r in rows, n in axes(T, 2)
+                    s += conj(U[r, n])*T[r, n]
+                end
+                result[i, g] += -imag(s)*dE/(π*nk)
+            end
+        end
+    end
+    return DensityOfStatesData(energies, result)
 end
