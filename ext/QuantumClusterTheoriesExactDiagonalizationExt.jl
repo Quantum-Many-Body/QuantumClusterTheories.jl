@@ -1,13 +1,13 @@
 module QuantumClusterTheoriesExactDiagonalizationExt
 
 using ExactDiagonalization: Abelian, BandLanczosMethod, ED, GreenFunction, GreenFunctionKind, GreenFunctionMethod, ThermalSeedBandLanczosMethod, normalize
-using LinearAlgebra: Diagonal, eigen, norm
+using LinearAlgebra: eigen, inv!, lu!, norm
 using QuantumLattices: AbstractLattice, Embedding, Hilbert, Lattice, Neighbors, OneOrMore, ZeroOrMore, OperatorGenerator, OperatorSet, QuantumOperator, Term, bonds, isintracell, kind, minimumlengths, nneighbor, rank, rcoordinate, scalartype, valtype
 using QuantumClusterTheories: Periodization, Perturbation, QCT, operators, qcttimer, quadratic
 using TightBindingApproximation: TBA, TBAKind
 using TimerOutputs: TimerOutput
-import QuantumClusterTheories: CPT, ImpuritySolver, VCA, derivative, Ω
-import QuantumLattices: Parameters, contenttocache, contenttoconfig, qlcsave, qlload, stamp, update!
+import QuantumClusterTheories: CPT, ImpuritySolver, VCA, Ω
+import QuantumLattices: Parameters, contenttocache, contenttoconfig, derivative, derivative!, qlcsave, qlload, stamp, update!
 
 """
     Cache
@@ -22,7 +22,9 @@ end
 """
     EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:GreenFunction} <: ImpuritySolver
 
-Exact diagonalization based impurity solver computing the retarded Green's function with caching.
+Exact diagonalization based impurity solver computing the retarded Green's function with caching and a reusable workspace.
+
+Note that concurrent evaluations on the same solver are not supported; use independent solvers or workspaces for parallel evaluations.
 """
 mutable struct EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:GreenFunction} <: ImpuritySolver
     const ed::E
@@ -34,6 +36,7 @@ mutable struct EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:Gr
     G::Cache
     G⁻¹::Cache
     ∂G::Cache
+    workspace::Matrix{ComplexF64}
     function EDSolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod; timer::TimerOutput=qcttimer)
         T = promote_type(scalartype(operators), scalartype(ed))
         return new{typeof(ed), eltype(operators), typeof(method), GreenFunction{T, real(T)}}(ed, operators, method, timer)
@@ -49,19 +52,17 @@ function set!(solver::EDSolver; ω::Number=1e-4im)
         nothing
     end
     if isnothing(cached)
-        eigensystem = eigen(solver.ed; nev=1, timer=solver.timer)
-        solver.Ω, v₀, sector₀ = only(eigensystem.values), only(eigensystem.vectors), only(eigensystem.sectors)
-        solver.gf = GreenFunction(solver.operators, solver.ed, GreenFunctionKind(:retarded), solver.method; e₀=solver.Ω, v₀=v₀, sector₀=sector₀, timer=solver.timer)
+        solver.gf = GreenFunction(solver.operators, solver.ed, GreenFunctionKind(:retarded), solver.method; timer=solver.timer, callback=info->(solver.Ω=info.Ω))
         qlcsave(solver; ndecimal=14)
     else
         solver.Ω = cached.Ω
         solver.gf = cached.gf
         samples!(solver.method, get(cached, :samples, nothing))
     end
-    solver.G = Cache(ω, solver.gf(ω))
+    solver.workspace = Matrix{ComplexF64}(undef, size(solver.gf.L))
+    solver.G = Cache(ω, solver.gf(ω; workspace=solver.workspace))
     solver.G⁻¹ = Cache(ω, inv(solver.G.data))
-    gf = solver.gf
-    solver.∂G = Cache(ω, gf.L*Diagonal(@. -1/(ω-gf.E)^2)*transpose(gf.R))
+    solver.∂G = Cache(ω, derivative(solver.gf, ω; workspace=solver.workspace))
     return solver
 end
 @inline function update!(solver::EDSolver; parameters...)
@@ -84,13 +85,15 @@ end
     (solver::EDSolver)(ω::Number) -> Matrix{ComplexF64}
 
 Evaluate the retarded Green's function at frequency `ω` using cached results when available.
+
+The returned matrix aliases the cache and is overwritten at a new frequency.
 """
 @inline function (solver::EDSolver)(ω::Number)
     if !isdefined(solver, :gf)
         set!(solver; ω=ω)
     elseif !(ω≈solver.G.ω)
+        solver.gf(solver.G.data, ω; workspace=solver.workspace)
         solver.G.ω = ω
-        solver.gf(fill!(solver.G.data, 0), ω)
     end
     return solver.G.data
 end
@@ -99,12 +102,19 @@ end
     inv(solver::EDSolver, ω::Number) -> Matrix{ComplexF64}
 
 Return the inverse of the retarded Green's function at frequency `ω` using cached results when available.
+
+The returned matrix aliases the cache and is overwritten at a new frequency.
 """
 @inline function Base.inv(solver::EDSolver, ω::Number)
     if !isdefined(solver, :gf)
         set!(solver; ω=ω)
     elseif !(ω≈solver.G⁻¹.ω)
-        solver.G⁻¹ = Cache(ω, inv(solver(ω)))
+        if ω≈solver.G.ω
+            inv!(lu!(copyto!(solver.G⁻¹.data, solver.G.data)))
+        else
+            inv!(solver.G⁻¹.data, solver.gf, ω; workspace=solver.workspace)
+        end
+        solver.G⁻¹.ω = ω
     end
     return solver.G⁻¹.data
 end
@@ -112,16 +122,16 @@ end
 """
     derivative(solver::EDSolver, ω::Number) -> Matrix{ComplexF64}
 
-The frequency derivative of the retarded Green's function at frequency `ω`,
-`∂G[i,j]/∂ω = -Σₖ L[i,k]R[j,k]/(ω-E[k])²`, evaluated from the Lehmann pole representation
-using cached results when available.
+The frequency derivative of the retarded Green's function at frequency `ω`, `∂G[i,j]/∂ω = -Σₖ L[i,k]R[j,k]/(ω-E[k])²`, evaluated from the Lehmann pole representation using cached results when available.
+
+The returned matrix aliases the cache and is overwritten at a new frequency.
 """
 function derivative(solver::EDSolver, ω::Number)
     if !isdefined(solver, :gf)
         set!(solver; ω=ω)
     elseif !(ω≈solver.∂G.ω)
-        gf = solver.gf
-        solver.∂G = Cache(ω, gf.L*Diagonal(@. -1/(ω-gf.E)^2)*transpose(gf.R))
+        derivative!(solver.∂G.data, solver.gf, ω; workspace=solver.workspace)
+        solver.∂G.ω = ω
     end
     return solver.∂G.data
 end
@@ -129,7 +139,7 @@ end
 """
     Ω(solver::EDSolver) -> Float64
 
-Return the grand potential of the exact diagonalization solver.
+Return the ground-state energy at zero temperature or the finite-temperature thermodynamic potential of the impurity Hamiltonian in its selected quantum-number sector.
 """
 @inline Ω(solver::EDSolver) = solver.Ω
 
@@ -390,7 +400,7 @@ Return the grand potential of the composed exact diagonalization solver.
 function Ω(solver::ComposedEDSolver)
     result = 0.0
     for block in solver.blocks
-        result += solver.representatives[block].Ω
+        result += Ω(solver.representatives[block])
     end
     return result
 end

@@ -58,12 +58,43 @@ import Plots
     @test inv(ω*I-m) ≈ solver(ω)
     @test invoke(inv, Tuple{ImpuritySolver, Number}, solver, ω) ≈ inv(solver, ω)
 
+    @test derivative === ExactDiagonalization.derivative
+    @test derivative === QuantumLattices.derivative
+
     # the frequency derivative of the solver Green's function, cached per frequency
     ∂G = derivative(solver, ω)
     @test ∂G ≈ -inv(ω*I-m)^2
     @test derivative(solver, ω)===∂G
+    G_cache, inverse_cache, derivative_cache = solver.G, solver.G⁻¹, solver.∂G
+    G_data, inverse_data, derivative_data = G_cache.data, inverse_cache.data, derivative_cache.data
+    workspace = solver.workspace
     ω′ = rand(ComplexF64)
+    @test inv(solver, ω′) === inverse_data
+    @test inv(solver, ω′) ≈ ω′*I-m
+    @test solver.G⁻¹ === inverse_cache
+    @test solver(ω′) === G_data
+    @test solver(ω′) ≈ inv(ω′*I-m)
+    @test solver.G === G_cache
+    @test derivative(solver, ω′) === derivative_data
     @test derivative(solver, ω′) ≈ -inv(ω′*I-m)^2
+    @test solver.∂G === derivative_cache
+    @test solver.workspace === workspace
+    @test (@allocated derivative(solver, ω′+0.1im)) == 0
+
+    # both the current-G reuse path and the GreenFunction inv! path preserve the inverse cache
+    ω₂ = rand(ComplexF64)
+    inv(solver, ω₂)
+    solver(ω′)
+    @test !(solver.G.ω≈solver.G⁻¹.ω)
+    @test inv(solver, ω′) === inverse_data
+    @test inv(solver, ω′) ≈ ω′*I-m
+    @test solver.G⁻¹ === inverse_cache
+    @test solver.G.data === G_data
+    ω₃ = rand(ComplexF64)
+    @test inv(solver, ω₃) === inverse_data
+    @test inv(solver, ω₃) ≈ ω₃*I-m
+    @test solver.G⁻¹ === inverse_cache
+    @test solver.workspace === workspace
 
     cpt = Algorithm(:Square, CPT(unitcell, lattice, hilbert, terms, quantumnumber))
     @test dimension(cpt) == dimension(cpt.frontend) == 2
@@ -399,10 +430,35 @@ end
     # the frequency derivative of the composed solver Green's function, cached per frequency (fixed ω with O(1) imaginary part keeps the finite difference well conditioned)
     solver = cpt.solver
     ω = 0.3 + 0.5im
-    ∂G = derivative(solver, ω)
-    @test derivative(solver, ω)===∂G
+    solver(ω)
+    inv(solver, ω)
+    @test derivative(solver, ω) === solver.∂G.data
+    caches = (solver.G, solver.G⁻¹, solver.∂G)
+    data = map(cache->cache.data, caches)
+    ω′ = 0.4 + 0.6im
+    @test solver(ω′) === data[1]
+    @test inv(solver, ω′) === data[2]
+    @test inv(solver, ω′) ≈ inv(copy(data[1]))
+    @test derivative(solver, ω′) === data[3]
+    @test solver.G === caches[1]
+    @test solver.G⁻¹ === caches[2]
+    @test solver.∂G === caches[3]
     δ = 1e-6
-    @test isapprox(∂G, (copy(solver(ω+δ))-copy(solver(ω-δ)))/(2δ); atol=1e-5)
+    @test isapprox(data[3], (copy(solver(ω′+δ))-copy(solver(ω′-δ)))/(2δ); atol=1e-5)
+
+    # the cache permutation must also be correct for a non-identity orbital ordering
+    permutation = reverse(collect(1:length(solver.permutation)))
+    permuted_solver = parentmodule(typeof(solver)).ComposedEDSolver(solver.blocks, solver.representatives, permutation)
+    permuted_solver(ω)
+    expected = zeros(ComplexF64, size(data[1]))
+    row, col = 1, 1
+    for block in permuted_solver.blocks
+        matrix = permuted_solver.representatives[block](ω)
+        nr, nc = size(matrix)
+        expected[row:row+nr-1, col:col+nc-1] .= matrix
+        row, col = row+nr, col+nc
+    end
+    @test permuted_solver.G.data ≈ expected[permutation, permutation]
 
     # Variational optimization of the staggered Weiss field
     vca = Algorithm(:SquareHubbardPlaquette, VCA(unitcell, lattice, hilbert, (t, μ, U), m, partition; timer); timer)
@@ -410,6 +466,36 @@ end
     @test isapprox(op.minimum, -4.4929112; atol=1e-6)
     @test isapprox(op.minimizer[1], 0.19543; atol=1e-4)
     @test op.minimum < Ω(cpt)
+end
+
+@testset "EDSolver thermodynamics" begin
+    unitcell = Lattice([0.0, 0.0]; vectors=[[1.0, 0.0]])
+    lattice = Lattice(unitcell, (4,))
+    hilbert = Hilbert(Fock{:f}(1, 2), length(lattice))
+    terms = (Hopping(:t, -1.0, 1),)
+    qn = ℕ(length(lattice)) ⊠ 𝕊ᶻ(0)
+    β = 2.0
+    mktempdir() do dir
+        cd(dir) do
+            method = ThermalSeedBandLanczosMethod(β=β, cutoff=0.9, nrandom=3, maxdim₁=40, maxdim₂=64, seed=UInt64(1234))
+            solver = ImpuritySolver(lattice, hilbert, terms, qn, method)
+            solver(0.2+0.3im)
+            path = QuantumLattices.pathof(solver)*".qlc"
+            key = stamp(solver; ndecimal=14)
+            cached = qlload(path, key)
+            @test cached.Ω ≈ solver.Ω
+
+            reloaded = ImpuritySolver(lattice, hilbert, terms, qn, method)
+            reloaded(0.2+0.3im)
+            @test Ω(reloaded) ≈ cached.Ω
+
+            qlsave(path, key, (Ω=0.0, gf=cached.gf, samples=cached.samples))
+            legacy = ImpuritySolver(lattice, hilbert, terms, qn, method)
+            legacy(0.2+0.3im)
+            @test legacy.Ω == 0.0
+            @test legacy.gf == cached.gf
+        end
+    end
 end
 
 @testset "ThermalCPT" begin

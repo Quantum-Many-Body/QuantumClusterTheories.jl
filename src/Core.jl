@@ -4,7 +4,7 @@ using TimerOutputs: TimerOutput
 using Optim: LBFGS, Options, optimize
 using QuadGK: quadgk
 using QuantumLattices: AbstractLattice, Algorithm, Assignment, Bond, BrillouinZone, CoordinatedIndex, Data, Fock, Generator, Hilbert, Index, LatticeModel, Metric, Neighbors, OneOrMore, ReciprocalSpace, Table, Term, ZeroAtLeast
-using QuantumLattices: atol, bonds, expand, isannihilation, isintracell, issubordinate, nneighbor, rank, rcoordinate, rtol
+using QuantumLattices: atol, bonds, derivative, expand, isannihilation, isintracell, issubordinate, nneighbor, rank, rcoordinate, rtol
 using StaticArrays: SVector
 using TightBindingApproximation: TBAKind
 
@@ -57,13 +57,6 @@ abstract type ImpuritySolver <: LatticeModel end
 Get the inverse of the retarded Green's function at frequency `ω`
 """
 @inline Base.inv(solver::ImpuritySolver, ω::Number) = inv(solver(ω))
-
-"""
-    derivative(solver::ImpuritySolver, ω::Number) -> Matrix{ComplexF64}
-
-The derivative of the impurity solver's Green's function with respect to its frequency argument.
-"""
-@inline derivative(solver::ImpuritySolver, ::Number) = error("derivative is not implemented for $(typeof(solver)).")
 
 """
     Perturbation
