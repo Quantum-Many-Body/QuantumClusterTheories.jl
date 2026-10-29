@@ -96,6 +96,22 @@ import Plots
     @test solver.G⁻¹ === inverse_cache
     @test solver.workspace === workspace
 
+    borrowed = nothing
+    with_solver(solver) do
+        borrowed = current_solver(solver)
+        @test borrowed !== solver
+        @test borrowed.gf === solver.gf
+        @test borrowed.pool === solver.pool
+        @test solver(ω′) === borrowed.G.data
+        derivative(solver, ω′+0.2im)
+        @test (@allocated derivative(solver, ω′+0.3im)) == 0
+    end
+    with_solver(solver) do
+        @test current_solver(solver) === borrowed
+    end
+    @test solver.pool.active == 0
+    @test only(solver.pool.idle) === borrowed
+
     cpt = Algorithm(:Square, CPT(unitcell, lattice, hilbert, terms, quantumnumber))
     @test dimension(cpt) == dimension(cpt.frontend) == 2
     @test cpt(ω, k) ≈ inv(ω*I-[2cos(k[1])+2cos(k[2]) 0; 0 2cos(k[1])+2cos(k[2])])
@@ -117,6 +133,8 @@ end
     es = LinRange(-10.0, 10.0, 501)
     path = ReciprocalPath(unitcell, rectangle"Γ-X-M-Γ"; length=100)
     spectra = cpt(:EB, DynamicalSpectra(path, es; η=0.1))
+    parallel_spectra = cpt(:EB_parallel, DynamicalSpectra(path, es; η=0.1); ntasks=2)
+    @test parallel_spectra.data.values ≈ spectra.data.values
     Plots.savefig(Plots.plot(spectra), "Plots-Hubbard-Square-2x2-spectral.png")
     Makie.save("Makie-Hubbard-Square-2x2-spectral.png", Makie.plot(spectra))
 
@@ -138,10 +156,17 @@ end
 
     es = LinRange(-10.0, 10.0, 501)
     bz = BrillouinZone(unitcell, 20)
-    # the QCT-style constructor translates to the shared TBA representation: bands=: and (fwhm, ne, emin, emax)=(2η, length, first, last)
     task = DensityOfStates(bz, es, [1], [2], :; η=0.1)
-    @test task.bands isa Colon && task.fwhm==0.2 && task.ne==501 && task.emin==-10.0 && task.emax==10.0
+    @test task isa InteractingDensityOfStates
+    @test task.energies == collect(es) && task.η == 0.1
     dos = cpt(:DOS, task)
+    parallel_dos = cpt(:DOS_parallel, task; ntasks=2)
+    @test parallel_dos.data.values ≈ dos.data.values
+    @test cpt.frontend.solver.pool.active == 0
+    @test 1 <= length(cpt.frontend.solver.pool.idle) <= 2
+    all_dos = cpt(:DOS_all, DensityOfStates(bz, es; η=0.1); ntasks=2)
+    @test size(all_dos.data.values, 2) == 1
+    @test all_dos.data.values[:, 1] ≈ dos.data.values[:, 3]
     spectra = cpt(:EB, DynamicalSpectra(bz, es; η=0.1))
 
     # the single-particle basis is ordered as [𝕔(1,1,-1//2), 𝕔(1,1,1//2)], so [1]/[2] are the spin-down/up projections
@@ -156,12 +181,8 @@ end
     @test_throws ErrorException DensityOfStates(bz, [0.0, 1.0, 1.5, 3.0])
     @test_throws ErrorException DensityOfStates(bz, es; η=0.0)
     @test_throws ErrorException DensityOfStates(bz, es; η=-0.1)
-    # run-time validation of tasks built with the plain TBA constructor, and of run-time options
-    @test_throws AssertionError cpt(:DOSband, DensityOfStates(bz, [1], :; ne=501, emin=-10.0, emax=10.0))
-    @test_throws ErrorException cpt(:DOSnan, DensityOfStates(bz; ne=501))
-    @test_throws ErrorException cpt(:DOSrange, DensityOfStates(bz, :, [3]; ne=501, emin=-10.0, emax=10.0))
-    @test_throws ErrorException cpt(:DOSempty, DensityOfStates(bz, :, Int[]; ne=501, emin=-10.0, emax=10.0))
-    @test_throws ErrorException cpt(:DOSopt, DensityOfStates(bz, es, :; η=0.1); gauge=:icoordinate)
+    @test_throws AssertionError cpt(:DOSopt, DensityOfStates(bz, es, :; η=0.1); gauge=:icoordinate)
+    @test_throws AssertionError cpt(:DOStasks, task; ntasks=0)
 
     Plots.savefig(Plots.plot(dos), "Plots-Hubbard-Square-2x2-dos.png")
     Makie.save("Makie-Hubbard-Square-2x2-dos.png", Makie.plot(dos))
@@ -460,6 +481,14 @@ end
     end
     @test permuted_solver.G.data ≈ expected[permutation, permutation]
 
+    algorithm = Algorithm(:Partitioned, cpt)
+    dos_task = DensityOfStates(BrillouinZone(unitcell, 2), LinRange(-1.0, 1.0, 5); η=0.1)
+    dos = algorithm(:DOS, dos_task)
+    parallel_dos = algorithm(:DOS_parallel, dos_task; ntasks=2)
+    @test parallel_dos.data.values ≈ dos.data.values
+    @test solver.pool.active == 0
+    @test 1 <= length(solver.pool.idle) <= 2
+
     # Variational optimization of the staggered Weiss field
     vca = Algorithm(:SquareHubbardPlaquette, VCA(unitcell, lattice, hilbert, (t, μ, U), m, partition; timer); timer)
     op = optimize!(vca)[2]
@@ -629,11 +658,6 @@ end
     # the kernel is normalized: the binned values sum to the number of generalized orbitals (2 spins), up to the Lorentzian tails outside the energy window
     @test isapprox(sum(dos.data.values[:, 1]), mapreduce(k->2(atan((4+2cos(k[1]))/η)+atan((4-2cos(k[1]))/η))/π, +, bz)/length(bz); atol=1e-3)
 
-    # the same task can also run on a tight-binding algorithm (with the Gaussian broadening kernel of the same fwhm)
-    tba = Algorithm(:FreeChainTBA, TBA(unitcell, Hilbert(Fock{:f}(1, 2), length(unitcell)), Hopping(:t, -1.0, 1)))
-    dos′ = tba(:DOS, DensityOfStates(bz, es; η=η))
-    @test size(dos′.data.values)==(length(es), 1)
-    @test isapprox(sum(dos′.data.values[:, 1]), 2.0; atol=1e-2)
 end
 
 @testset "BdGChain-DOS" begin

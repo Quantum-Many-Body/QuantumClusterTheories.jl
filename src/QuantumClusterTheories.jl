@@ -5,7 +5,7 @@ using .Optimizer
 export NoisyNewton
 
 include("Core.jl")
-export CPT, CPTPerturbation, DensityOfStates, DensityOfStatesData, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, Periodization, Perturbation, QCT, VCA, VCAPerturbation, chemicalpotential, derivative, expectation, filling, operators, optimize!, quadratic, qcttimer, Ω
+export CPT, CPTPerturbation, DensityOfStates, DensityOfStatesData, DynamicalSpectra, DynamicalSpectraData, ImpuritySolver, InteractingDensityOfStates, Periodization, Perturbation, QCT, SolverPool, VCA, VCAPerturbation, chemicalpotential, current_solver, derivative, expectation, filling, new_solver, operators, optimize!, quadratic, qcttimer, spectral, with_solver, Ω
 
 include("Transport.jl")
 export Conductivity, ConductivityData

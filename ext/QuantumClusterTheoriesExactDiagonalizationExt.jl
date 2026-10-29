@@ -3,10 +3,10 @@ module QuantumClusterTheoriesExactDiagonalizationExt
 using ExactDiagonalization: Abelian, BandLanczosMethod, ED, GreenFunction, GreenFunctionKind, GreenFunctionMethod, ThermalSeedBandLanczosMethod, normalize
 using LinearAlgebra: eigen, inv!, lu!, norm
 using QuantumLattices: AbstractLattice, Embedding, Hilbert, Lattice, Neighbors, OneOrMore, ZeroOrMore, OperatorGenerator, OperatorSet, QuantumOperator, Term, bonds, isintracell, kind, minimumlengths, nneighbor, rank, rcoordinate, scalartype, valtype
-using QuantumClusterTheories: Periodization, Perturbation, QCT, operators, qcttimer, quadratic
+using QuantumClusterTheories: qcttimer, Periodization, Perturbation, QCT, current_solver, operators, quadratic, with_solver
 using TightBindingApproximation: TBA, TBAKind
 using TimerOutputs: TimerOutput
-import QuantumClusterTheories: CPT, ImpuritySolver, VCA, Ω
+import QuantumClusterTheories: CPT, ImpuritySolver, SolverPool, VCA, new_solver, Ω
 import QuantumLattices: Parameters, contenttocache, contenttoconfig, derivative, derivative!, qlcsave, qlload, stamp, update!
 
 """
@@ -18,34 +18,42 @@ mutable struct Cache
     ω::ComplexF64
     const data::Matrix{ComplexF64}
 end
+@inline Cache(n::Integer, m::Integer) = Cache(ComplexF64(NaN, NaN), Matrix{ComplexF64}(undef, n, m))
 
 """
     EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:GreenFunction} <: ImpuritySolver
 
 Exact diagonalization based impurity solver computing the retarded Green's function with caching and a reusable workspace.
 
-Note that concurrent evaluations on the same solver are not supported; use independent solvers or workspaces for parallel evaluations.
+For concurrent evaluations, use [`with_solver`](@ref) to bind a borrowed solver of the same type to each task. Borrowed solvers share the model and Green's function poles but own independent caches and workspaces.
 """
 mutable struct EDSolver{E<:ED, O<:QuantumOperator, M<:GreenFunctionMethod, G<:GreenFunction} <: ImpuritySolver
     const ed::E
     const operators::Vector{O}
     const method::M
     const timer::TimerOutput
+    const pool::SolverPool{EDSolver{E, O, M, G}}
     Ω::Float64
     gf::G
     G::Cache
     G⁻¹::Cache
     ∂G::Cache
     workspace::Matrix{ComplexF64}
+    function EDSolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod, timer::TimerOutput, pool::SolverPool, Ω::Float64, gf::GreenFunction, G::Cache, G⁻¹::Cache, ∂G::Cache, workspace::Matrix{ComplexF64})
+        return new{typeof(ed), eltype(operators), typeof(method), typeof(gf)}(ed, operators, method, timer, pool, Ω, gf, G, G⁻¹, ∂G, workspace)
+    end
     function EDSolver(ed::ED, operators::AbstractVector{<:QuantumOperator}, method::GreenFunctionMethod; timer::TimerOutput=qcttimer)
         T = promote_type(scalartype(operators), scalartype(ed))
-        return new{typeof(ed), eltype(operators), typeof(method), GreenFunction{T, real(T)}}(ed, operators, method, timer)
+        S = EDSolver{typeof(ed), eltype(operators), typeof(method), GreenFunction{T, real(T)}}
+        return new{typeof(ed), eltype(operators), typeof(method), GreenFunction{T, real(T)}}(ed, operators, method, timer, SolverPool{S}())
     end
 end
 @inline Parameters(solver::EDSolver) = Parameters(solver.ed)
 @inline contenttocache(solver::EDSolver) = (Ω=solver.Ω, gf=solver.gf, samples=samples(solver.method))
 @inline contenttoconfig(solver::EDSolver) = (contenttoconfig(solver.ed), solver.operators, contenttoconfig(solver.method))
 function set!(solver::EDSolver; ω::Number=1e-4im)
+    @assert solver.pool.active==0 "Solver cannot be updated while parallel evaluations are active."
+    empty!(solver.pool.idle)
     cached = try
         qlload(pathof(solver)*".qlc", stamp(solver; ndecimal=14))
     catch
@@ -67,6 +75,7 @@ function set!(solver::EDSolver; ω::Number=1e-4im)
 end
 @inline function update!(solver::EDSolver; parameters...)
     if length(parameters) > 0
+        @assert solver.pool.active==0 "Solver cannot be updated while parallel evaluations are active."
         update!(solver.ed; parameters...)
         set!(solver)
     end
@@ -80,6 +89,12 @@ end
     append!(method.samples, cached)
     return method
 end
+function new_solver(solver::EDSolver)
+    return EDSolver(
+        solver.ed, solver.operators, solver.method, solver.timer, solver.pool, solver.Ω, solver.gf,
+        Cache(size(solver.gf)...), Cache(size(solver.gf)...), Cache(size(solver.gf)...), Matrix{ComplexF64}(undef, size(solver.gf.L))
+    )
+end
 
 """
     (solver::EDSolver)(ω::Number) -> Matrix{ComplexF64}
@@ -89,9 +104,10 @@ Evaluate the retarded Green's function at frequency `ω` using cached results wh
 The returned matrix aliases the cache and is overwritten at a new frequency.
 """
 @inline function (solver::EDSolver)(ω::Number)
-    if !isdefined(solver, :gf)
-        set!(solver; ω=ω)
-    elseif !(ω≈solver.G.ω)
+    isdefined(solver, :gf) || set!(solver; ω=ω)
+    current = current_solver(solver)
+    current === solver || return current(ω)
+    if !(ω≈solver.G.ω)
         solver.gf(solver.G.data, ω; workspace=solver.workspace)
         solver.G.ω = ω
     end
@@ -106,9 +122,10 @@ Return the inverse of the retarded Green's function at frequency `ω` using cach
 The returned matrix aliases the cache and is overwritten at a new frequency.
 """
 @inline function Base.inv(solver::EDSolver, ω::Number)
-    if !isdefined(solver, :gf)
-        set!(solver; ω=ω)
-    elseif !(ω≈solver.G⁻¹.ω)
+    isdefined(solver, :gf) || set!(solver; ω=ω)
+    current = current_solver(solver)
+    current === solver || return inv(current, ω)
+    if !(ω≈solver.G⁻¹.ω)
         if ω≈solver.G.ω
             inv!(lu!(copyto!(solver.G⁻¹.data, solver.G.data)))
         else
@@ -127,9 +144,10 @@ The frequency derivative of the retarded Green's function at frequency `ω`, `�
 The returned matrix aliases the cache and is overwritten at a new frequency.
 """
 function derivative(solver::EDSolver, ω::Number)
-    if !isdefined(solver, :gf)
-        set!(solver; ω=ω)
-    elseif !(ω≈solver.∂G.ω)
+    isdefined(solver, :gf) || set!(solver; ω=ω)
+    current = current_solver(solver)
+    current === solver || return derivative(current, ω)
+    if !(ω≈solver.∂G.ω)
         derivative!(solver.∂G.data, solver.gf, ω; workspace=solver.workspace)
         solver.∂G.ω = ω
     end
@@ -318,19 +336,26 @@ mutable struct ComposedEDSolver{E<:EDSolver} <: ImpuritySolver
     const blocks::Vector{Int}
     const representatives::Vector{E}
     const permutation::Vector{Int}
+    const pool::SolverPool{ComposedEDSolver{E}}
     G::Cache
     G⁻¹::Cache
     ∂G::Cache
+    function ComposedEDSolver(blocks::AbstractVector{Int}, representatives::AbstractVector{<:EDSolver}, permutation::AbstractVector{Int}, pool::SolverPool, G::Cache, G⁻¹::Cache, ∂G::Cache)
+        return new{eltype(representatives)}(blocks, representatives, permutation, pool, G, G⁻¹, ∂G)
+    end
     function ComposedEDSolver(blocks::AbstractVector{Int}, representatives::AbstractVector{<:EDSolver}, permutation::AbstractVector{Int})
-        return new{eltype(representatives)}(blocks, representatives, permutation)
+        S = ComposedEDSolver{eltype(representatives)}
+        return new{eltype(representatives)}(blocks, representatives, permutation, SolverPool{S}())
     end
 end
 @inline Parameters(solver::ComposedEDSolver) = mapreduce(Parameters, merge, solver.representatives)
 @inline function update!(solver::ComposedEDSolver; parameters...)
     if length(parameters) > 0
+        @assert solver.pool.active==0 "Solver cannot be updated while parallel evaluations are active."
         for rep in solver.representatives
             update!(rep; parameters...)
         end
+        empty!(solver.pool.idle)
         setG!(solver)
         setG⁻¹!(solver)
         set∂G!(solver)
@@ -361,6 +386,11 @@ function setcache!(solver::ComposedEDSolver, field::Symbol, ms::Vector{<:Abstrac
     cache.data[:] = @view cache.data[solver.permutation, solver.permutation]
     return solver
 end
+function new_solver(solver::ComposedEDSolver)
+    representatives = map(new_solver, solver.representatives)
+    n = sum(block->size(solver.representatives[block].gf.L, 1), solver.blocks)
+    return ComposedEDSolver(solver.blocks, representatives, solver.permutation, solver.pool, Cache(n, n), Cache(n, n), Cache(n, n))
+end
 
 """
     (solver::ComposedEDSolver)(ω::Number) -> Matrix{ComplexF64}
@@ -368,6 +398,8 @@ end
 Evaluate the block-diagonal retarded Green's function at frequency `ω` using cached results when available.
 """
 @inline function (solver::ComposedEDSolver)(ω::Number)
+    current = current_solver(solver)
+    current === solver || return current(ω)
     (isdefined(solver, :G) && ω≈solver.G.ω) || setG!(solver; ω=ω)
     return solver.G.data
 end
@@ -378,6 +410,8 @@ end
 Return the inverse of the block-diagonal retarded Green's function at frequency `ω` using cached results when available.
 """
 function Base.inv(solver::ComposedEDSolver, ω::Number)
+    current = current_solver(solver)
+    current === solver || return inv(current, ω)
     (isdefined(solver, :G⁻¹) && ω≈solver.G⁻¹.ω) || setG⁻¹!(solver; ω=ω)
     return solver.G⁻¹.data
 end
@@ -388,6 +422,8 @@ end
 The frequency derivative of the block-diagonal retarded Green's function at frequency `ω` using cached results when available.
 """
 function derivative(solver::ComposedEDSolver, ω::Number)
+    current = current_solver(solver)
+    current === solver || return derivative(current, ω)
     (isdefined(solver, :∂G) && ω≈solver.∂G.ω) || set∂G!(solver; ω=ω)
     return solver.∂G.data
 end
