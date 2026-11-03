@@ -698,7 +698,7 @@ end
 """
     InteractingDensityOfStates{B<:BrillouinZone, E<:AbstractVector{<:AbstractFloat}, L<:Tuple{Vararg{Union{Colon, AbstractVector{Int}}}}} <: DensityOfStates
 
-Density-of-states task for quantum cluster theories, using an explicit energy grid and Lorentzian broadening. The shared [`DensityOfStatesData`](@ref) representation is used for the computed result.
+Density-of-states task for quantum cluster theories, using an explicit energy grid and Lorentzian broadening. The shared `DensityOfStatesData` representation is used for the computed result.
 """
 struct InteractingDensityOfStates{B<:BrillouinZone, E<:AbstractVector{<:AbstractFloat}, L<:Tuple{Vararg{Union{Colon, AbstractVector{Int}}}}} <: DensityOfStates
     brillouinzone::B
@@ -713,7 +713,7 @@ end
 
 Construct an [`InteractingDensityOfStates`](@ref) with an explicit, strictly increasing and uniform energy grid and Lorentzian broadening `η`. This positional method is distinct from the `TightBindingApproximation` constructor, whose second positional argument selects bands as `:` or `AbstractVector{Int}`.
 
-Each `orbitals` specifies one set of generalized orbitals, i.e., the integer positions in the single-particle basis of the periodized Green's function, and `:` selects all of them. One column of the resulting `values` is computed per set; with no `orbitals` given, a single all-orbital set is assumed. The result uses the shared [`DensityOfStatesData`](@ref) representation.
+Each `orbitals` specifies one set of generalized orbitals, i.e., the integer positions in the single-particle basis of the periodized Green's function, and `:` selects all of them. One column of the resulting `values` is computed per set; with no `orbitals` given, a single all-orbital set is assumed. The result uses the shared `DensityOfStatesData` representation.
 
 The spectral values are computed by [`spectral`](@ref), then summed over the Brillouin zone and multiplied by `dE/Nₖ`, so each column sums approximately to the number of selected generalized orbitals up to Lorentzian tails outside the energy window.
 
