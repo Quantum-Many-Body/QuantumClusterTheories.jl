@@ -8,7 +8,7 @@ using QuantumLattices: atol, bonds, derivative, expand, isannihilation, isintrac
 using StaticArrays: SVector
 using TightBindingApproximation: TBAKind
 
-import QuantumLattices: Parameters, dependencytypes, dimension, kind, matrix, options, run!, update!
+import QuantumLattices: Parameters, dimension, kind, matrix, options, run!, update!
 import TightBindingApproximation: DensityOfStates, DensityOfStatesData, TBA
 import TightBindingApproximation.Fitting: optimize!
 
@@ -57,6 +57,85 @@ abstract type ImpuritySolver <: LatticeModel end
 Get the inverse of the retarded Green's function at frequency `ω`
 """
 @inline Base.inv(solver::ImpuritySolver, ω::Number) = inv(solver(ω))
+
+"""
+    SolverPool{S<:ImpuritySolver}
+
+A pool of borrowed solvers of the same concrete type `S` for concurrent evaluations. The `idle` vector contains solvers available for borrowing, `active` counts solvers currently checked out, and `lock` synchronizes changes to the pool.
+
+A solver supporting [`with_solver`](@ref) owns a `SolverPool` and implements [`new_solver`](@ref). Pool creation is cheap; borrowed solvers and their evaluation caches are created lazily. Pools are intended for tasks within one Julia process and should not be serialized for distributed execution.
+"""
+mutable struct SolverPool{S<:ImpuritySolver}
+    const idle::Vector{S}
+    const lock::ReentrantLock
+    active::Int
+end
+@inline SolverPool{S}() where {S<:ImpuritySolver} = SolverPool(S[], ReentrantLock(), 0)
+
+"""
+    new_solver(solver::ImpuritySolver) -> typeof(solver)
+
+Construct a new solver of the same concrete type for use in a [`SolverPool`](@ref). Implementations should share immutable model data and already-constructed Green's function data while creating independent evaluation caches and workspaces. This is not a deep copy or a fresh model construction.
+
+Concrete impurity solvers supporting [`with_solver`](@ref) must implement this interface.
+"""
+function new_solver(solver::ImpuritySolver)
+    error("Solver pooling is not supported by $(typeof(solver)); implement new_solver for this solver type.")
+end
+
+"""
+    current_solver(solver::ImpuritySolver) -> typeof(solver)
+
+Return the solver borrowed by the current task for `solver`, or return `solver` itself when no borrowed solver is bound. This is how the ordinary `solver(ω)`, `inv(solver, ω)` and `derivative(solver, ω)` interfaces transparently use task-private caches within [`with_solver`](@ref).
+
+A binding belongs to the task that created it and must not be inherited by another task. Use [`with_solver`](@ref) explicitly in each spawned task.
+"""
+@inline function current_solver(solver::ImpuritySolver)
+    lease = get(task_local_storage(), solver, nothing)
+    isnothing(lease) && return solver
+    lease.owner === current_task() || error("A borrowed solver cannot be inherited by another task; use with_solver in the child task.")
+    return lease.solver::typeof(solver)
+end
+
+"""
+    with_solver(f, solver::ImpuritySolver)
+
+Evaluate `f` with a solver borrowed from `solver.pool` and bound to the current task. Within the scope, calls to `solver(ω)`, `inv(solver, ω)` and `derivative(solver, ω)` use the borrowed solver's caches and workspace. Without a borrowed solver, these calls use the original solver directly.
+
+The scope may cover a whole frequency slice, so cached matrices and workspaces are reused throughout the slice. Cached matrices returned inside the scope must not be used after it exits. Nested scopes in the same task reuse the same borrowed solver. Each spawned task must enter its own scope.
+
+Concrete solvers supporting this interface own a [`SolverPool`](@ref) and implement [`new_solver`](@ref).
+"""
+function with_solver(f, solver::ImpuritySolver)
+    storage = task_local_storage()
+    previous = get(storage, solver, nothing)
+    if !isnothing(previous) && previous.owner===current_task()
+        return f()
+    end
+    pool = solver.pool
+    borrowed = lock(pool.lock) do
+        if pool.active==0 && isempty(pool.idle)
+            solver(1e-4im)
+        end
+        borrowed = isempty(pool.idle) ? new_solver(solver) : pop!(pool.idle)
+        pool.active += 1
+        return borrowed
+    end
+    storage[solver] = (owner=current_task(), solver=borrowed)
+    try
+        return f()
+    finally
+        if isnothing(previous)
+            delete!(storage, solver)
+        else
+            storage[solver] = previous
+        end
+        lock(pool.lock) do
+            push!(pool.idle, borrowed)
+            pool.active -= 1
+        end
+    end
+end
 
 """
     Perturbation
@@ -498,6 +577,67 @@ function optimize!(
 end
 
 """
+    spectral(qct::Union{QCT, Algorithm{<:QCT}}, reciprocalspace::ReciprocalSpace, energies; η=0.1, orbitals=(:,), ntasks=1) -> Array{Float64, 3}
+
+Compute the spectral function of a quantum cluster theory on a reciprocal space and one or more energies. The returned array has shape `(length(energies), length(reciprocalspace), length(orbitals))` and entries
+
+    values[i, j, g] = -(1/π) Im Tr[P₍g₎ G(ωᵢ+iη,kⱼ)],
+
+where `G(ω,k) = U(k) inv(G⁻¹(ω+iη)-V(k)) U(k)'` is the periodized Green's function and `P₍g₎` projects onto the `g`-th orbital group. Each orbital group is specified by `:` or a vector of generalized-orbital positions; multiple groups are supplied as a tuple.
+
+The option `ntasks` controls frequency-slice parallelism. Each spawned task borrows one solver for its entire frequency slice, reusing its cached matrices and workspace at every frequency in that slice. Parallel evaluation requires a solver that supports task-private evaluation through [`SolverPool`](@ref), [`new_solver`](@ref) and [`current_solver`](@ref). A single energy is always evaluated serially.
+
+[`DynamicalSpectra`](@ref) applies an optional rescaling to these values, while [`DensityOfStates`](@ref) sums them over the Brillouin zone and bins them in energy.
+"""
+@inline spectral(qct::Algorithm{<:QCT}, args...; kwargs...) = spectral(qct.frontend, args...; kwargs...)
+function spectral(qct::QCT, reciprocalspace::ReciprocalSpace, energies::Union{Real, AbstractVector{<:Real}}; η::Real=0.1, orbitals=(:,), ntasks::Integer=1)
+    η>0 || error("spectral error: η must be positive.")
+    @assert ntasks>=1 "spectral error: ntasks must be positive."
+    norbital = dimension(qct)
+    specifications = orbitals isa Tuple ? orbitals : (orbitals,)
+    groups = map(specifications) do indices
+        positions = indices isa Colon ? collect(1:norbital) : collect(indices)
+        (isempty(positions) || !all(p->1<=p<=norbital, positions)) && error("spectral error: set of generalized orbitals $indices is empty or out of the range 1:$norbital.")
+        return positions
+    end
+    Vs = [qct.perturbation(k) for k in reciprocalspace]
+    Us = [matrix(qct.periodization, k) for k in reciprocalspace]
+    result = zeros(length(energies), length(reciprocalspace), length(groups))
+    function run_slice(indices)
+        buffer = Matrix{ComplexF64}(undef, size(first(Vs)))
+        T = Matrix{ComplexF64}(undef, (norbital, size(first(Vs), 2)))
+        for i in indices
+            G⁻¹ = inv(qct.solver, energies[i]+1im*η)
+            for (j, (V, U)) in enumerate(zip(Vs, Us))
+                # T = U*G̃ with G̃ = inv(G⁻¹-V): only the diagonal of G = U*G̃*U' is needed, so the full matrix is never formed explicitly
+                copyto!(buffer, G⁻¹)
+                axpby!(-1, V, 1, buffer)
+                mul!(T, U, inv!(lu!(buffer)))
+                for (g, rows) in enumerate(groups)
+                    s = zero(ComplexF64)
+                    @inbounds for r in rows, n in axes(T, 2)
+                        s += conj(U[r, n])*T[r, n]
+                    end
+                    result[i, j, g] = -imag(s)/π
+                end
+            end
+        end
+    end
+    if ntasks == 1 || length(energies) == 1
+        run_slice(1:length(energies))
+    else
+        @sync for indices in Iterators.partition(1:length(energies), cld(length(energies), ntasks))
+            Threads.@spawn begin
+                with_solver(qct.solver) do
+                    run_slice(indices)
+                end
+            end
+        end
+    end
+    return result
+end
+
+"""
     DynamicalSpectra{R<:ReciprocalSpace, E<:Union{Float64, Vector{Float64}}, L<:Tuple{Vararg{Union{Colon, AbstractVector{Int}}}}, F<:Function}
 
 Dynamical spectra: the spectral function on a reciprocal space, optionally projected onto sets of generalized orbitals.
@@ -509,7 +649,7 @@ struct DynamicalSpectra{R<:ReciprocalSpace, E<:Union{Float64, Vector{Float64}}, 
     orbitals::L
     rescale::F
 end
-@inline dependencytypes(::Type{<:DynamicalSpectra}) = ()
+@inline options(::Type{<:Assignment{<:DynamicalSpectra}}) = (ntasks="number of frequency-slice tasks",)
 
 """
     DynamicalSpectra(reciprocalspace::ReciprocalSpace, energies::AbstractVector{<:Real}, orbitals::Union{Colon, AbstractVector{Int}}...=:; η::Real=0.1, rescale::Function=identity)
@@ -522,6 +662,8 @@ Construct a dynamical-spectra task. The computed values are
 where `G(ω,k) = U(k) inv(G⁻¹(ω+iη)-V(k)) U(k)'` is the periodized Green's function and `P₍g₎` the projector onto the `g`-th set of generalized orbitals. Each `orbitals` specifies one set of generalized orbitals, i.e., the integer positions in the single-particle basis of the periodized Green's function, and `:` selects all of them.
 
 With a single `energy` (the second constructor), the result is the spectral surface at that energy, in particular the Fermi surface of an interacting system when `energy=μ`, which can be visualized as heatmaps on a two-dimensional Brillouin/reciprocal zone.
+
+The values are computed by [`spectral`](@ref). The run-time option `ntasks=1` controls frequency-slice parallelism and is registered for this task type. Parallel evaluation requires a solver that supports task-private evaluation through [`SolverPool`](@ref), [`new_solver`](@ref) and [`current_solver`](@ref); a single energy is evaluated serially.
 """
 function DynamicalSpectra(reciprocalspace::ReciprocalSpace, energies::AbstractVector{<:Real}, orbitals::Union{Colon, AbstractVector{Int}}...=:; η::Real=0.1, rescale::Function=identity)
     η>0 || error("DynamicalSpectra error: η must be positive.")
@@ -546,55 +688,38 @@ struct DynamicalSpectraData{R<:ReciprocalSpace, E<:Union{Float64, Vector{Float64
     energies::E
     values::Array{Float64, 3}
 end
-function run!(qct::Algorithm{<:QCT}, ds::Assignment{<:DynamicalSpectra})
-    frontend, task = qct.frontend, ds.task
-    η, rescale, energies = task.η, task.rescale, task.energies
-    norbital = dimension(frontend)
-    groups = map(task.orbitals) do orbitals
-        positions = orbitals isa Colon ? collect(1:norbital) : collect(orbitals)
-        (isempty(positions) || !all(p->1<=p<=norbital, positions)) && error("DynamicalSpectra error: set of generalized orbitals $orbitals is empty or out of the range 1:$norbital.")
-        return positions
-    end
-    Vs = [frontend.perturbation(k) for k in task.reciprocalspace]
-    Us = [matrix(frontend.periodization, k) for k in task.reciprocalspace]
-    result = zeros(length(energies), length(task.reciprocalspace), length(groups))
-    buffer = Matrix{ComplexF64}(undef, size(first(Vs)))
-    T = Matrix{ComplexF64}(undef, (norbital, size(first(Vs), 2)))
-    for (i, ω) in enumerate(energies)
-        G⁻¹ = inv(frontend.solver, ω+1im*η)
-        for (j, (V, U)) in enumerate(zip(Vs, Us))
-            # T = U*G̃ with G̃ = inv(G⁻¹-V): the diagonal of the periodized Green's function G = U*G̃*U' then follows as G[r, r] = Σₙ conj(U[r, n])*T[r, n], so the full matrix G is never formed explicitly
-            copyto!(buffer, G⁻¹)
-            axpby!(-1, V, 1, buffer)
-            mul!(T, U, inv!(lu!(buffer)))
-            for (g, rows) in enumerate(groups)
-                s = zero(ComplexF64)
-                @inbounds for r in rows, n in axes(T, 2)
-                    s += conj(U[r, n])*T[r, n]
-                end
-                result[i, j, g] = rescale(-imag(s)/π)
-            end
-        end
-    end
+function run!(qct::Algorithm{<:QCT}, ds::Assignment{<:DynamicalSpectra}; ntasks::Integer=1)
+    task = ds.task
+    result = spectral(qct, task.reciprocalspace, task.energies; η=task.η, orbitals=task.orbitals, ntasks=ntasks)
+    map!(task.rescale, result, result)
     return DynamicalSpectraData(task.reciprocalspace, task.energies, result)
 end
 
 """
+    InteractingDensityOfStates{B<:BrillouinZone, E<:AbstractVector{<:AbstractFloat}, L<:Tuple{Vararg{Union{Colon, AbstractVector{Int}}}}} <: DensityOfStates
+
+Density-of-states task for quantum cluster theories, using an explicit energy grid and Lorentzian broadening. The shared [`DensityOfStatesData`](@ref) representation is used for the computed result.
+"""
+struct InteractingDensityOfStates{B<:BrillouinZone, E<:AbstractVector{<:AbstractFloat}, L<:Tuple{Vararg{Union{Colon, AbstractVector{Int}}}}} <: DensityOfStates
+    brillouinzone::B
+    energies::E
+    η::Float64
+    orbitals::L
+end
+@inline options(::Type{<:Assignment{<:InteractingDensityOfStates}}) = (ntasks="number of frequency-slice tasks",)
+
+"""
     DensityOfStates(brillouinzone::BrillouinZone, energies::AbstractVector{<:AbstractFloat}, orbitals::Union{Colon, AbstractVector{Int}}...; η::Real=0.1)
 
-Construct a density-of-states task in the idiom of quantum cluster theories, i.e., with an explicit energy grid and the Lorentzian broadening `η`, instead of the `emin`/`emax`/`ne`/`fwhm` parametrization of the plain `TightBindingApproximation` constructor. The grid must be strictly increasing and uniform, with at least two points. The task is stored in the shared `TightBindingApproximation.DensityOfStates` representation as `ne=length(energies)`, `emin=first(energies)`, `emax=last(energies)` and `fwhm=2η`; since `2η` and `fwhm` are the full widths at half maximum of the Lorentzian and Gaussian broadening kernels of the two frontends, respectively, the same task can be shared between both frontends with the same physical meaning.
+Construct an [`InteractingDensityOfStates`](@ref) with an explicit, strictly increasing and uniform energy grid and Lorentzian broadening `η`. This positional method is distinct from the `TightBindingApproximation` constructor, whose second positional argument selects bands as `:` or `AbstractVector{Int}`.
 
-Each `orbitals` specifies one set of generalized orbitals, i.e., the integer positions in the single-particle basis of the periodized Green's function, and `:` selects all of them. One column of the resulting `values` is computed per set; with no `orbitals` given, a single all-orbital set is assumed.
+Each `orbitals` specifies one set of generalized orbitals, i.e., the integer positions in the single-particle basis of the periodized Green's function, and `:` selects all of them. One column of the resulting `values` is computed per set; with no `orbitals` given, a single all-orbital set is assumed. The result uses the shared [`DensityOfStatesData`](@ref) representation.
 
-On a quantum-cluster-theory frontend, the computed values are
+The spectral values are computed by [`spectral`](@ref), then summed over the Brillouin zone and multiplied by `dE/Nₖ`, so each column sums approximately to the number of selected generalized orbitals up to Lorentzian tails outside the energy window.
 
-    values[i, g] = -(dE/(πNₖ)) Σₖ Im Tr[P₍g₎ G(ωᵢ+iη, k)],
-
-where `G(ω,k) = U(k) inv(G⁻¹(ω+iη)-V(k)) U(k)'` is the periodized Green's function, `P₍g₎` the projector onto the `g`-th set of generalized orbitals and `dE=(emax-emin)/(ne-1)` the width of the energy bins. As in `TightBindingApproximation`, the kernel is normalized and the values are binned, so that each column sums approximately to the number of selected generalized orbitals (up to the Lorentzian tails outside the energy window).
-
-Compared to the `TightBindingApproximation` frontend, the following restrictions are enforced at run time: `bands` must be `:` (band indices are meaningless for interacting systems), `emin`/`emax` must be finite (they cannot be determined automatically from the non-existent eigenvalues of an interacting system), and no options (`gauge`/`infinitesimal`) are supported.
+The run-time option `ntasks=1` controls frequency-slice parallelism and is registered for this task type. Parallel evaluation requires a solver that supports task-private evaluation through [`SolverPool`](@ref), [`new_solver`](@ref) and [`current_solver`](@ref).
 """
-function DensityOfStates(brillouinzone::BrillouinZone, energies::AbstractVector{<:AbstractFloat}, orbitals::Union{Colon, AbstractVector{Int}}...; η::Real=0.1)
+function DensityOfStates(brillouinzone::BrillouinZone, energies::AbstractVector{<:AbstractFloat}, orbitals::Union{Colon, AbstractVector{Int}}...=:; η::Real=0.1)
     length(energies)>=2 || error("DensityOfStates error: at least two energy sample points are required.")
     issorted(energies) && first(energies)<last(energies) || error("DensityOfStates error: energies must be strictly increasing.")
     if !(energies isa AbstractRange)
@@ -602,43 +727,12 @@ function DensityOfStates(brillouinzone::BrillouinZone, energies::AbstractVector{
         all(δ->isapprox(δ, first(Δ); rtol=1e-6), Δ) || error("DensityOfStates error: only uniform energy grids are supported.")
     end
     η>0 || error("DensityOfStates error: η must be positive.")
-    return DensityOfStates(brillouinzone, :, orbitals...; fwhm=2η, ne=length(energies), emin=first(energies), emax=last(energies))
+    return InteractingDensityOfStates(brillouinzone, collect(Float64, energies), convert(Float64, η), orbitals)
 end
-function run!(qct::Algorithm{<:QCT}, dos::Assignment{<:DensityOfStates}; options...)
-    isempty(options) || error("DensityOfStates error: options $(keys(options)) are meaningless for quantum cluster theories.")
-    frontend, task = qct.frontend, dos.task
-    task.bands isa Colon || error("DensityOfStates error: band selection is meaningless for a quantum cluster theory; `bands` must be `:`.")
-    (isnan(task.emin) || isnan(task.emax)) && error("DensityOfStates error: `emin`/`emax` cannot be determined automatically for a quantum cluster theory; please assign finite values.")
-    η = task.fwhm/2
-    energies = LinRange(task.emin, task.emax, task.ne)
-    dE = (task.emax-task.emin)/(task.ne-1)
-    norbital = dimension(frontend)
-    groups = map(task.orbitals) do orbitals
-        positions = orbitals isa Colon ? collect(1:norbital) : collect(orbitals)
-        (isempty(positions) || !all(p->1<=p<=norbital, positions)) && error("DensityOfStates error: set of generalized orbitals $orbitals is empty or out of the range 1:$norbital.")
-        return positions
-    end
-    Vs = [frontend.perturbation(k) for k in task.brillouinzone]
-    Us = [matrix(frontend.periodization, k) for k in task.brillouinzone]
-    nk = length(task.brillouinzone)
-    result = zeros(task.ne, length(groups))
-    buffer = Matrix{ComplexF64}(undef, size(first(Vs)))
-    T = Matrix{ComplexF64}(undef, (norbital, size(first(Vs), 2)))
-    for (i, ω) in enumerate(energies)
-        G⁻¹ = inv(frontend.solver, ω+1im*η)
-        for (j, (V, U)) in enumerate(zip(Vs, Us))
-            # T = U*G̃ with G̃ = inv(G⁻¹-V): the diagonal of the periodized Green's function G = U*G̃*U' then follows as G[r, r] = Σₙ conj(U[r, n])*T[r, n], so the full matrix G is never formed explicitly
-            copyto!(buffer, G⁻¹)
-            axpby!(-1, V, 1, buffer)
-            mul!(T, U, inv!(lu!(buffer)))
-            for (g, rows) in enumerate(groups)
-                s = zero(ComplexF64)
-                @inbounds for r in rows, n in axes(T, 2)
-                    s += conj(U[r, n])*T[r, n]
-                end
-                result[i, g] += -imag(s)*dE/(π*nk)
-            end
-        end
-    end
-    return DensityOfStatesData(energies, result)
+function run!(qct::Algorithm{<:QCT}, dos::Assignment{<:InteractingDensityOfStates}; ntasks::Integer=1, options...)
+    task = dos.task
+    values = spectral(qct, task.brillouinzone, task.energies; η=task.η, orbitals=task.orbitals, ntasks=ntasks)
+    dE = (last(task.energies)-first(task.energies))/(length(task.energies)-1)
+    result = dropdims(sum(values; dims=2); dims=2).*(dE/length(task.brillouinzone))
+    return DensityOfStatesData(task.energies, result)
 end

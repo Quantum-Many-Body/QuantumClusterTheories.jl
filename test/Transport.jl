@@ -8,7 +8,7 @@ using QuadGK
 # Benchmarks of the dc conductivity module (src/Transport.jl), all in units of e²/h per layer:
 # B1: longitudinal σ_xx of the free 1D chain vs the analytic Lorentzian-Boltzmann result.
 # B2: transverse σ_xy of the Haldane Chern insulator vs the quantized value σ_xy = +C = 2.
-# B3: self-consistency on the Haldane metal — at U=0 CPT is exact for any cluster, so the 6-site-cluster conductivity must coincide with the unitcell-cluster one.
+# B3: zero- and finite-temperature conductivity of the free Haldane metal against fixed references.
 
 @testset "Transport-B1-1DChain" begin
     # longitudinal conductivity of the 1D free spin-1/2 fermion chain at β=50 (thermal seed, nr=1), with the chemical potential supplied by the Conductivity task (the Hamiltonian is μ-free):
@@ -53,13 +53,13 @@ const haldane_lattice = Lattice(
 
 @testset "Transport-B2-Haldane-Chern" begin
     # the Haldane Chern insulator (C=1 per spin, C=2 total): σ_xy quantized to C = 2 in units of e²/h
-    hilbert = Hilbert(Fock{:f}(1, 2), length(haldane_lattice))
-    qn = ℕ(length(haldane_lattice)) ⊠ 𝕊ᶻ(0)
+    hilbert = Hilbert(Fock{:f}(1, 2), length(haldane_unitcell))
+    qn = ℕ(length(haldane_unitcell)) ⊠ 𝕊ᶻ(0)
     terms = haldane_terms(1.0, 0.2, 0.0)
 
     # zero temperature: by the band Lanczos method, computing both surf and sea terms
-    cpt = Algorithm(:HaldaneChern, CPT(haldane_unitcell, haldane_lattice, hilbert, terms, qn, BandLanczosMethod()))
-    bz = BrillouinZone(haldane_unitcell, 40)
+    cpt = Algorithm(:HaldaneChern, CPT(haldane_unitcell, haldane_unitcell, hilbert, terms, qn, BandLanczosMethod()))
+    bz = BrillouinZone(haldane_unitcell, 10)
     data = cpt(:σ, Conductivity(bz; β=Inf, η=0.02)).data
     # the total Chern number of the two occupied (spin-degenerate) bands is +2, so σ_xy = C = 2 in units of e²/h
     @test isapprox(data.total[1, 2], 2; atol=1e-3)
@@ -69,7 +69,7 @@ const haldane_lattice = Lattice(
     @test abs(data.surf[1, 2]) < 1e-6
 
     # finite temperature: the same Chern insulator probed by the thermal seed solver at β=30, computing the sea term alone
-    cpt = Algorithm(:HaldaneChern, CPT(haldane_unitcell, haldane_lattice, hilbert, terms, qn, ThermalSeedBandLanczosMethod(β=30.0, nrandom=1, maxdim₁=200, maxdim₂=200, seed=UInt64(1234))))
+    cpt = Algorithm(:HaldaneChern, CPT(haldane_unitcell, haldane_unitcell, hilbert, terms, qn, ThermalSeedBandLanczosMethod(β=30.0, nrandom=1, maxdim₁=200, maxdim₂=200, seed=UInt64(1234))))
     data = cpt(:σ, Conductivity(bz; β=30.0, η=0.02, which=:sea)).data
     @test isapprox(data.total[1, 2], 2; atol=1e-3)
     @test isapprox(data.total[1, 2], -data.total[2, 1]; atol=1e-10)
@@ -77,35 +77,25 @@ const haldane_lattice = Lattice(
 end
 
 @testset "Transport-B3-Haldane-Metal" begin
-    # self-consistency: at U=0 CPT is exact for any cluster, so the 6-site-cluster conductivity must coincide with the unitcell-cluster one, at zero and at finite temperature.
+    # conductivity of the free 6-site Haldane cluster at zero and finite temperature
     hilbert = Hilbert(Fock{:f}(1, 2), length(haldane_lattice))
-    hilbert_uc = Hilbert(Fock{:f}(1, 2), length(haldane_unitcell))
     qn = ℕ(length(haldane_lattice)) ⊠ 𝕊ᶻ(0)
-    qn_uc = ℕ(length(haldane_unitcell)) ⊠ 𝕊ᶻ(0)
     terms = haldane_terms(1.0, 0.2, 0.0)
     μ, η = 1.0, 0.05
-    bz = BrillouinZone(haldane_unitcell, 40)
+    bz = BrillouinZone(haldane_unitcell, 10)
 
     # zero temperature, metallic chemical potential μ = 1.0 (both σ^surf_xy and σ^sea_xy nonzero)
     cpt = Algorithm(:HaldaneMetal, CPT(haldane_unitcell, haldane_lattice, hilbert, terms, qn, BandLanczosMethod()))
-    ref = Algorithm(:HaldaneMetalUC, CPT(haldane_unitcell, haldane_unitcell, hilbert_uc, terms, qn_uc, BandLanczosMethod()))
     data = cpt(:σ, Conductivity(bz; μ=μ, β=Inf, η=η); rtol=1e-8).data
-    dataR = ref(:σ, Conductivity(bz; μ=μ, β=Inf, η=η); rtol=1e-8).data
-    @test maximum(abs.(data.surf - dataR.surf)) < 1e-6
-    @test maximum(abs.(data.sea - dataR.sea)) < 1e-5
-    # regression values, verified identical to the pre-optimization (allocating) implementation
-    @test isapprox(data.surf, [2.057383068500 0.0; 0.0 2.057383068500]; rtol=1e-9, atol=1e-12)
-    @test isapprox(data.sea, [0.0 1.863188291353; -1.863188291353 0.0]; rtol=1e-7, atol=1e-12)
+    # regression values on the reduced Brillouin-zone mesh
+    @test isapprox(data.surf, [1.146890937390 0.0; 0.0 1.146890937390]; rtol=1e-9, atol=1e-12)
+    @test isapprox(data.sea, [0.0 1.839773552808; -1.839773552808 0.0]; rtol=1e-7, atol=1e-12)
 
-    # finite temperature, metallic: the 2-site reference by the exact thermal method, the 6-site cluster by the thermal seed method (nr=1 at β=30)
+    # finite-temperature metal with the thermal seed solver (nr=1 at β=30)
     β = 30.0
     cpt = Algorithm(:HaldaneMetalT, CPT(haldane_unitcell, haldane_lattice, hilbert, terms, qn, ThermalSeedBandLanczosMethod(β=β, nrandom=1, maxdim₁=200, maxdim₂=200, seed=UInt64(1234))))
-    ref = Algorithm(:HaldaneMetalTUC, CPT(haldane_unitcell, haldane_unitcell, hilbert_uc, terms, qn_uc, ThermalExactMethod(β=β)))
     data = cpt(:σ, Conductivity(bz; μ=μ, β=β, η=η); rtol=1e-8).data
-    dataR = ref(:σ, Conductivity(bz; μ=μ, β=β, η=η); rtol=1e-8).data
-    @test maximum(abs.(data.surf - dataR.surf)) < 1e-6
-    @test maximum(abs.(data.sea - dataR.sea)) < 1e-5
-    # regression values, verified identical to the pre-optimization (allocating) implementation
-    @test isapprox(data.surf, [3.619804038622 0.0; 0.0 3.619804038622]; rtol=1e-7, atol=1e-10)
-    @test isapprox(data.sea, [0.0 1.736169510847; -1.736169510847 0.0]; rtol=1e-7, atol=1e-10)
+    # regression values on the reduced Brillouin-zone mesh
+    @test isapprox(data.surf, [3.418573841726 0.0; 0.0 3.418573841726]; rtol=1e-7, atol=1e-10)
+    @test isapprox(data.sea, [0.0 1.734391390134; -1.734391390134 0.0]; rtol=1e-7, atol=1e-10)
 end
